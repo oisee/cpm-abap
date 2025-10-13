@@ -5,6 +5,7 @@ RunCPM/
 node_modules/
 output/
 *.backup
+*.old
 
 # npm
 package-lock.json

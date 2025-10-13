@@ -9,7 +9,7 @@ CLASS zcl_cpu_8080_test DEFINITION
   FINAL.
 
   PRIVATE SECTION.
-    DATA: mo_cpu TYPE REF TO zcl_cpu_8080.
+    DATA: mo_cpu TYPE REF TO zcl_cpu_8080_v2.
 
     METHODS:
       setup FOR TESTING,
@@ -54,12 +54,12 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
 
   METHOD test_memory.
     " Test memory read/write operations
-    mo_cpu->write_byte( iv_addr = 1000 iv_val = 'AB' ).
+    mo_cpu->write_byte( iv_addr = 1000 iv_val = 171 ).  " 0xAB = 171
 
     DATA(lv_byte) = mo_cpu->read_memory( 1000 ).
     cl_abap_unit_assert=>assert_equals(
       act = lv_byte
-      exp = 'AB'
+      exp = 171  " 0xAB
       msg = 'Memory write/read should work' ).
 
     mo_cpu->write_word( iv_addr = 2000 iv_val = 12345 ).
@@ -75,7 +75,7 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
   METHOD test_nop.
     " Test NOP instruction
     mo_cpu->reset( ).
-    mo_cpu->write_byte( iv_addr = 256 iv_val = '00' ).  " NOP
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 0 ).  " NOP
     mo_cpu->execute_instruction( ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -90,9 +90,9 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
     mo_cpu->reset( ).
 
     " Opcode: 01 34 12 (LD BC,0x1234)
-    mo_cpu->write_byte( iv_addr = 256 iv_val = '01' ).
-    mo_cpu->write_byte( iv_addr = 257 iv_val = '34' ).  " Low byte
-    mo_cpu->write_byte( iv_addr = 258 iv_val = '12' ).  " High byte
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 1 ).   " 0x01
+    mo_cpu->write_byte( iv_addr = 257 iv_val = 52 ).  " 0x34
+    mo_cpu->write_byte( iv_addr = 258 iv_val = 18 ).  " 0x12
 
     mo_cpu->execute_instruction( ).
 
@@ -111,10 +111,15 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
   METHOD test_inc_bc.
     " Test INC BC instruction
     mo_cpu->reset( ).
-    mo_cpu->mv_bc = 1000.
+    " Cannot set mv_bc directly in v2, use write/read instead
+    " Write program: LD BC,1000; INC BC
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 1 ).  " LD BC,nnnn
+    mo_cpu->write_byte( iv_addr = 257 iv_val = 232 ).  " Low byte of 1000
+    mo_cpu->write_byte( iv_addr = 258 iv_val = 3 ).   " High byte of 1000
+    mo_cpu->write_byte( iv_addr = 259 iv_val = 3 ).  " INC BC
 
-    mo_cpu->write_byte( iv_addr = 256 iv_val = '03' ).  " INC BC
-    mo_cpu->execute_instruction( ).
+    mo_cpu->execute_instruction( ).  " LD BC,1000
+    mo_cpu->execute_instruction( ).  " INC BC
 
     cl_abap_unit_assert=>assert_equals(
       act = mo_cpu->get_bc( )
@@ -126,7 +131,7 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
   METHOD test_halt.
     " Test HALT instruction
     mo_cpu->reset( ).
-    mo_cpu->write_byte( iv_addr = 256 iv_val = '76' ).  " HALT
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 118 ).  " 0x76 = HALT
 
     mo_cpu->execute_instruction( ).
 
@@ -142,9 +147,9 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
     mo_cpu->reset( ).
 
     " JP 0x2000
-    mo_cpu->write_byte( iv_addr = 256 iv_val = 'C3' ).
-    mo_cpu->write_byte( iv_addr = 257 iv_val = '00' ).  " Low byte
-    mo_cpu->write_byte( iv_addr = 258 iv_val = '20' ).  " High byte
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 195 ).  " 0xC3 = JP
+    mo_cpu->write_byte( iv_addr = 257 iv_val = 0 ).   " Low byte
+    mo_cpu->write_byte( iv_addr = 258 iv_val = 32 ).  " 0x20 = High byte
 
     mo_cpu->execute_instruction( ).
 
@@ -158,14 +163,17 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
   METHOD test_call_ret.
     " Test CALL and RET instructions
     mo_cpu->reset( ).
-    mo_cpu->mv_sp = 65535.  " Top of stack
+    " Set SP using LD SP,nnnn first
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 49 ).   " 0x31 = LD SP,nnnn
+    mo_cpu->write_byte( iv_addr = 257 iv_val = 255 ).  " Low byte of 65535
+    mo_cpu->write_byte( iv_addr = 258 iv_val = 255 ).  " High byte of 65535
+    mo_cpu->write_byte( iv_addr = 259 iv_val = 205 ).  " 0xCD = CALL
+    mo_cpu->write_byte( iv_addr = 260 iv_val = 0 ).    " Low byte of 0x3000
+    mo_cpu->write_byte( iv_addr = 261 iv_val = 48 ).   " 0x30 = High byte
 
-    " CALL 0x3000
-    mo_cpu->write_byte( iv_addr = 256 iv_val = 'CD' ).
-    mo_cpu->write_byte( iv_addr = 257 iv_val = '00' ).
-    mo_cpu->write_byte( iv_addr = 258 iv_val = '30' ).
+    mo_cpu->execute_instruction( ).  " LD SP,65535
 
-    mo_cpu->execute_instruction( ).
+    mo_cpu->execute_instruction( ).  " CALL 0x3000
 
     cl_abap_unit_assert=>assert_equals(
       act = mo_cpu->get_pc( )
@@ -178,12 +186,12 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
       msg = 'CALL should push return address on stack' ).
 
     " RET
-    mo_cpu->write_byte( iv_addr = 12288 iv_val = 'C9' ).
+    mo_cpu->write_byte( iv_addr = 12288 iv_val = 201 ).  " 0xC9 = RET
     mo_cpu->execute_instruction( ).
 
     cl_abap_unit_assert=>assert_equals(
       act = mo_cpu->get_pc( )
-      exp = 259
+      exp = 262  " Return address after CALL
       msg = 'RET should return to caller' ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -203,14 +211,14 @@ CLASS zcl_cpu_8080_test IMPLEMENTATION.
     " LD HL,0x5678   ; 21 78 56
     " HALT           ; 76
 
-    mo_cpu->write_byte( iv_addr = 256 iv_val = '01' ).
-    mo_cpu->write_byte( iv_addr = 257 iv_val = '34' ).
-    mo_cpu->write_byte( iv_addr = 258 iv_val = '12' ).
-    mo_cpu->write_byte( iv_addr = 259 iv_val = '03' ).
-    mo_cpu->write_byte( iv_addr = 260 iv_val = '21' ).
-    mo_cpu->write_byte( iv_addr = 261 iv_val = '78' ).
-    mo_cpu->write_byte( iv_addr = 262 iv_val = '56' ).
-    mo_cpu->write_byte( iv_addr = 263 iv_val = '76' ).
+    mo_cpu->write_byte( iv_addr = 256 iv_val = 1 ).
+    mo_cpu->write_byte( iv_addr = 257 iv_val = 52 ).   " 0x34
+    mo_cpu->write_byte( iv_addr = 258 iv_val = 18 ).   " 0x12
+    mo_cpu->write_byte( iv_addr = 259 iv_val = 3 ).
+    mo_cpu->write_byte( iv_addr = 260 iv_val = 33 ).   " 0x21
+    mo_cpu->write_byte( iv_addr = 261 iv_val = 120 ).  " 0x78
+    mo_cpu->write_byte( iv_addr = 262 iv_val = 86 ).   " 0x56
+    mo_cpu->write_byte( iv_addr = 263 iv_val = 118 ).  " 0x76
 
     " Execute program
     DATA(lv_instructions) = mo_cpu->execute_until_halt( iv_max_instructions = 100 ).

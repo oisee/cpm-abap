@@ -44,6 +44,63 @@ cpm-abap/
 └── README.md                        - This file
 ```
 
+## Implementation Plan
+
+### 🎯 Current Sprint: Fix Transpiler Compatibility (TODAY)
+
+**Goal:** Enable local TDD with instant test execution (< 1 second)
+
+**Status:** IN PROGRESS
+
+**Tasks:**
+- [x] Setup npm/transpiler packages
+- [x] Create transpiler-compatible test class
+- [ ] Fix memory representation (table → XSTRING)
+- [ ] Fix BIT operations (use proper hex types)
+- [ ] Fix lookup table initialization
+- [ ] Transpile and verify no errors
+- [ ] Run tests locally with Node.js
+- [ ] Commit working version
+
+**Why:** This unlocks instant local testing without SAP server, enabling true TDD workflow
+
+**Time estimate:** 2-4 hours
+
+### Milestone 1: Complete i8080 Instruction Set (1-2 weeks)
+
+**Goal:** Run real CP/M .COM files (HELLO.COM)
+
+**Remaining opcodes:** 220
+- MOV r,r family (49 opcodes)
+- ADD/ADC/SUB/SBC family (32 opcodes)
+- AND/OR/XOR/CP family (32 opcodes)
+- Conditional jumps/calls/returns (16 opcodes)
+- Stack operations (PUSH, POP - 8 opcodes)
+- I/O operations (IN, OUT - 8 opcodes)
+- Rotate/shift operations (8 opcodes)
+
+### Milestone 2: CP/M BDOS Emulation (1-2 weeks)
+
+**Goal:** Run interactive CP/M programs (text adventures, BASIC)
+
+**Components:**
+- BDOS syscall interface (intercept CALL 0x0005)
+- Console I/O (functions 1, 2, 9, 10, 11)
+- File I/O (functions 15, 16, 20-26)
+- Disk operations (simulated via ABAP tables or browser storage)
+
+### Milestone 3: Z80 Extensions (2-3 weeks, optional)
+
+**Goal:** Run advanced software (Turbo Pascal, CP/M 3)
+
+**Extensions:**
+- CB prefix - Bit operations (BIT, SET, RES, shifts)
+- ED prefix - Block operations (LDIR, CPIR, etc.)
+- DD/FD prefix - IX/IY index registers
+- Alternate register set (AF', BC', DE', HL')
+
+---
+
 ## Implementation Status
 
 ### ✓ Completed (Proof of Concept)

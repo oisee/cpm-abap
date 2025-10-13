@@ -1,8 +1,9 @@
 *&---------------------------------------------------------------------*
-*& Z80/i8080 CPU Emulator - Core Class
+*& Z80/i8080 CPU Emulator - Transpiler-Compatible Version
 *& Based on RunCPM architecture with hybrid switch/case + lookup tables
+*& Memory as XSTRING, BIT operations on proper hex types
 *&---------------------------------------------------------------------*
-CLASS zcl_cpu_8080 DEFINITION
+CLASS zcl_cpu_8080_v2 DEFINITION
   PUBLIC
   FINAL
   CREATE PUBLIC.
@@ -17,12 +18,12 @@ CLASS zcl_cpu_8080 DEFINITION
 
     " Flag bit constants (matching Z80 flag register layout)
     CONSTANTS:
-      c_flag_c TYPE x LENGTH 1 VALUE '01',  " Carry
-      c_flag_n TYPE x LENGTH 1 VALUE '02',  " Add/Subtract (BCD)
-      c_flag_p TYPE x LENGTH 1 VALUE '04',  " Parity/Overflow
-      c_flag_h TYPE x LENGTH 1 VALUE '10',  " Half-carry (bit 3->4)
-      c_flag_z TYPE x LENGTH 1 VALUE '40',  " Zero
-      c_flag_s TYPE x LENGTH 1 VALUE '80'.  " Sign (bit 7)
+      c_flag_c TYPE i VALUE 1,   " Carry
+      c_flag_n TYPE i VALUE 2,   " Add/Subtract (BCD)
+      c_flag_p TYPE i VALUE 4,   " Parity/Overflow
+      c_flag_h TYPE i VALUE 16,  " Half-carry (bit 3->4)
+      c_flag_z TYPE i VALUE 64,  " Zero
+      c_flag_s TYPE i VALUE 128. " Sign (bit 7)
 
     METHODS:
       constructor,
@@ -52,7 +53,32 @@ CLASS zcl_cpu_8080 DEFINITION
       " Memory inspection
       read_memory
         IMPORTING iv_addr       TYPE i
-        RETURNING VALUE(rv_val) TYPE x LENGTH 1.
+        RETURNING VALUE(rv_val) TYPE i,
+
+      " For testing - expose methods
+      read_byte
+        IMPORTING iv_addr       TYPE i
+        RETURNING VALUE(rv_val) TYPE i,
+
+      write_byte
+        IMPORTING iv_addr TYPE i
+                  iv_val  TYPE i,
+
+      read_word
+        IMPORTING iv_addr       TYPE i
+        RETURNING VALUE(rv_val) TYPE i,
+
+      write_word
+        IMPORTING iv_addr TYPE i
+                  iv_val  TYPE i,
+
+      get_high_byte
+        IMPORTING iv_pair       TYPE i
+        RETURNING VALUE(rv_val) TYPE i,
+
+      get_low_byte
+        IMPORTING iv_pair       TYPE i
+        RETURNING VALUE(rv_val) TYPE i.
 
   PRIVATE SECTION.
 
@@ -66,28 +92,20 @@ CLASS zcl_cpu_8080 DEFINITION
       mv_sp TYPE i,    " Stack Pointer
       mv_status TYPE i VALUE 0.  " CPU status
 
-    " === Memory (64KB) ===
-    TYPES: ty_memory TYPE STANDARD TABLE OF x LENGTH 1 WITH EMPTY KEY.
-    DATA: mt_memory TYPE ty_memory.
+    " === Memory (64KB as XSTRING - transpiler-compatible) ===
+    " Each byte = 2 hex chars, so 131072 chars total
+    DATA: mv_memory TYPE xstring.
 
-    " === Pre-computed Lookup Tables ===
+    " === Pre-computed Lookup Tables (as XSTRING) ===
     DATA:
-      mt_parity_table TYPE ty_memory,  " Parity flag for 0..255
-      mt_inc_table    TYPE ty_memory,  " INC instruction flags (0..256)
-      mt_dec_table    TYPE ty_memory,  " DEC instruction flags (0..255)
-      mt_cbits_table  TYPE ty_memory.  " Carry bits for ADD/SUB (0..511)
+      mv_parity_table TYPE xstring,  " Parity flag for 0..255 (512 hex chars)
+      mv_inc_table    TYPE xstring,  " INC instruction flags (514 hex chars for 257 entries)
+      mv_dec_table    TYPE xstring,  " DEC instruction flags (512 hex chars)
+      mv_cbits_table  TYPE xstring.  " Carry bits (1024 hex chars for 512 entries)
 
-    " === Helper Methods - Bit Manipulation ===
+    " === Helper Methods ===
     METHODS:
-      " Register byte access
-      get_high_byte
-        IMPORTING iv_pair       TYPE i
-        RETURNING VALUE(rv_val) TYPE i,
-
-      get_low_byte
-        IMPORTING iv_pair       TYPE i
-        RETURNING VALUE(rv_val) TYPE i,
-
+      " Bit manipulation
       set_high_byte
         IMPORTING iv_pair       TYPE i
                   iv_val        TYPE i
@@ -99,70 +117,52 @@ CLASS zcl_cpu_8080 DEFINITION
         RETURNING VALUE(rv_new) TYPE i,
 
       " Flag operations
-      set_flag
-        IMPORTING iv_flag TYPE x LENGTH 1
-                  iv_cond TYPE abap_bool,
-
-      test_flag
-        IMPORTING iv_flag       TYPE x LENGTH 1
-        RETURNING VALUE(rv_set) TYPE abap_bool,
-
       set_flags_byte
-        IMPORTING iv_flags TYPE x LENGTH 1,
+        IMPORTING iv_flags TYPE i,
 
       get_flags_byte
-        RETURNING VALUE(rv_flags) TYPE x LENGTH 1.
+        RETURNING VALUE(rv_flags) TYPE i,
 
-    " === Memory Access ===
-    METHODS:
-      read_byte
-        IMPORTING iv_addr       TYPE i
-        RETURNING VALUE(rv_val) TYPE x LENGTH 1,
-
-      write_byte
-        IMPORTING iv_addr TYPE i
-                  iv_val  TYPE x LENGTH 1,
-
-      read_word
-        IMPORTING iv_addr       TYPE i
-        RETURNING VALUE(rv_val) TYPE i,
-
-      write_word
-        IMPORTING iv_addr TYPE i
-                  iv_val  TYPE i,
-
-      " Convenience methods (post-increment/decrement)
+      " Memory access helpers
       read_byte_pp
         CHANGING cv_addr       TYPE i
-        RETURNING VALUE(rv_val) TYPE x LENGTH 1,
+        RETURNING VALUE(rv_val) TYPE i,
 
       read_word_pp
         CHANGING cv_addr       TYPE i
-        RETURNING VALUE(rv_val) TYPE i.
+        RETURNING VALUE(rv_val) TYPE i,
 
-    " === Lookup Table Initialization ===
-    METHODS:
+      " Lookup table initialization
       init_tables,
 
       calc_parity
         IMPORTING iv_val        TYPE i
-        RETURNING VALUE(rv_par) TYPE i.
+        RETURNING VALUE(rv_par) TYPE i,
 
-    " === Opcode Execution ===
-    METHODS:
+      byte_to_hex
+        IMPORTING iv_byte        TYPE i
+        RETURNING VALUE(rv_hex)  TYPE string,
+
+      hex_to_byte
+        IMPORTING iv_hex         TYPE string
+        RETURNING VALUE(rv_byte) TYPE i,
+
+      " Opcode execution
       execute_opcode
-        IMPORTING iv_opcode TYPE x LENGTH 1
+        IMPORTING iv_opcode TYPE i
         RETURNING VALUE(rv_cycles) TYPE i.
 
 ENDCLASS.
 
 
-CLASS zcl_cpu_8080 IMPLEMENTATION.
+CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
 
   METHOD constructor.
-    " Initialize memory (64KB of zeros)
+    " Initialize memory (64KB = 131072 hex chars, all zeros)
+    DATA: lv_zeros TYPE string VALUE '00'.
+    mv_memory = ''.
     DO 65536 TIMES.
-      APPEND '00' TO mt_memory.
+      mv_memory = mv_memory && lv_zeros.
     ENDDO.
 
     " Initialize lookup tables
@@ -188,91 +188,115 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
   METHOD init_tables.
     DATA: lv_val   TYPE i,
           lv_flags TYPE i,
-          lv_par   TYPE i.
+          lv_par   TYPE i,
+          lv_temp  TYPE i,
+          lv_hex   TYPE string.
 
     " === Parity Table (256 entries) ===
-    " Parity flag: 4 if even parity (even number of 1 bits), 0 if odd
-    CLEAR mt_parity_table.
+    mv_parity_table = ''.
     DO 256 TIMES.
       lv_val = sy-index - 1.
       lv_par = calc_parity( lv_val ).
       IF lv_par MOD 2 = 0.  " Even parity
-        APPEND '04' TO mt_parity_table.
+        lv_flags = 4.
       ELSE.
-        APPEND '00' TO mt_parity_table.
+        lv_flags = 0.
       ENDIF.
+      lv_hex = byte_to_hex( lv_flags ).
+      mv_parity_table = mv_parity_table && lv_hex.
     ENDDO.
 
-    " === INC Table (257 entries - includes 256) ===
-    " Flags: (val & 0xA8) | ((val == 0) << 6) | ((val & 0x0F) == 0) << 4)
-    CLEAR mt_inc_table.
+    " === INC Table (257 entries) ===
+    mv_inc_table = ''.
     DO 257 TIMES.
       lv_val = sy-index - 1.
       lv_flags = 0.
 
-      " Bits 7,5,3 of result (undocumented flags)
-      DATA(lv_temp) = lv_val.
-      lv_temp = lv_temp BIT-AND 168.  " 0xA8
-      lv_flags = lv_temp.
+      " Bits 7,5,3 of result
+      lv_temp = lv_val MOD 256.
+      DATA(lv_masked) = lv_temp - ( lv_temp MOD 8 ).  " Keep bits 7,5,3
+      IF lv_masked >= 128.
+        lv_flags = lv_flags + 128.
+        lv_masked = lv_masked - 128.
+      ENDIF.
+      IF lv_masked >= 32.
+        lv_flags = lv_flags + 32.
+        lv_masked = lv_masked - 32.
+      ENDIF.
+      IF lv_masked >= 8.
+        lv_flags = lv_flags + 8.
+      ENDIF.
 
-      " Zero flag (bit 6)
+      " Zero flag
       IF lv_val MOD 256 = 0.
-        lv_flags = lv_flags BIT-OR 64.  " 0x40
+        lv_flags = lv_flags + 64.
       ENDIF.
 
-      " Half-carry flag (bit 4) - set if lower nibble is 0
+      " Half-carry flag
       IF lv_val MOD 16 = 0.
-        lv_flags = lv_flags BIT-OR 16.  " 0x10
+        lv_flags = lv_flags + 16.
       ENDIF.
 
-      APPEND lv_flags TO mt_inc_table.
+      lv_hex = byte_to_hex( lv_flags ).
+      mv_inc_table = mv_inc_table && lv_hex.
     ENDDO.
 
     " === DEC Table (256 entries) ===
-    " Flags: (val & 0xA8) | ((val == 0) << 6) | ((val & 0x0F) == 0x0F) << 4) | 2
-    CLEAR mt_dec_table.
+    mv_dec_table = ''.
     DO 256 TIMES.
       lv_val = sy-index - 1.
       lv_flags = 0.
 
       " Bits 7,5,3 of result
-      lv_temp = lv_val BIT-AND 168.  " 0xA8
-      lv_flags = lv_temp.
+      lv_temp = lv_val.
+      lv_masked = lv_temp - ( lv_temp MOD 8 ).
+      IF lv_masked >= 128.
+        lv_flags = lv_flags + 128.
+        lv_masked = lv_masked - 128.
+      ENDIF.
+      IF lv_masked >= 32.
+        lv_flags = lv_flags + 32.
+        lv_masked = lv_masked - 32.
+      ENDIF.
+      IF lv_masked >= 8.
+        lv_flags = lv_flags + 8.
+      ENDIF.
 
       " Zero flag
       IF lv_val = 0.
-        lv_flags = lv_flags BIT-OR 64.
+        lv_flags = lv_flags + 64.
       ENDIF.
 
-      " Half-carry flag - set if lower nibble is 0x0F
+      " Half-carry flag
       IF lv_val MOD 16 = 15.
-        lv_flags = lv_flags BIT-OR 16.
+        lv_flags = lv_flags + 16.
       ENDIF.
 
-      " N flag (subtract) - always set for DEC
-      lv_flags = lv_flags BIT-OR 2.
+      " N flag (subtract)
+      lv_flags = lv_flags + 2.
 
-      APPEND lv_flags TO mt_dec_table.
+      lv_hex = byte_to_hex( lv_flags ).
+      mv_dec_table = mv_dec_table && lv_hex.
     ENDDO.
 
     " === Carry Bits Table (512 entries) ===
-    " Used for ADD HL,rr instructions
-    " (i & 0x10) | ((i >> 8) & 1)
-    CLEAR mt_cbits_table.
+    mv_cbits_table = ''.
     DO 512 TIMES.
       lv_val = sy-index - 1.
       lv_flags = 0.
 
       " Half-carry from bit 4
-      lv_temp = lv_val BIT-AND 16.
-      lv_flags = lv_temp.
+      IF lv_val MOD 32 >= 16.
+        lv_flags = lv_flags + 16.
+      ENDIF.
 
       " Carry from bit 8
       IF lv_val >= 256.
-        lv_flags = lv_flags BIT-OR 1.
+        lv_flags = lv_flags + 1.
       ENDIF.
 
-      APPEND lv_flags TO mt_cbits_table.
+      lv_hex = byte_to_hex( lv_flags ).
+      mv_cbits_table = mv_cbits_table && lv_hex.
     ENDDO.
   ENDMETHOD.
 
@@ -293,6 +317,38 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
     ENDDO.
 
     rv_par = lv_count.
+  ENDMETHOD.
+
+
+  METHOD byte_to_hex.
+    " Convert byte (0-255) to 2-character hex string
+    DATA: lv_high TYPE i,
+          lv_low  TYPE i.
+
+    CONSTANTS: lc_hex TYPE string VALUE '0123456789ABCDEF'.
+
+    lv_high = iv_byte DIV 16.
+    lv_low = iv_byte MOD 16.
+
+    rv_hex = lc_hex+lv_high(1) && lc_hex+lv_low(1).
+  ENDMETHOD.
+
+
+  METHOD hex_to_byte.
+    " Convert 2-character hex string to byte (0-255)
+    DATA: lv_high TYPE i,
+          lv_low  TYPE i,
+          lv_char TYPE c LENGTH 1.
+
+    CONSTANTS: lc_hex TYPE string VALUE '0123456789ABCDEF'.
+
+    lv_char = iv_hex+0(1).
+    FIND lv_char IN lc_hex MATCH OFFSET lv_high.
+
+    lv_char = iv_hex+1(1).
+    FIND lv_char IN lc_hex MATCH OFFSET lv_low.
+
+    rv_byte = lv_high * 16 + lv_low.
   ENDMETHOD.
 
 
@@ -319,34 +375,6 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD set_flag.
-    DATA: lv_f    TYPE i,
-          lv_mask TYPE i.
-
-    lv_f = get_low_byte( mv_af ).
-
-    IF iv_cond = abap_true.
-      " Set flag bit
-      lv_f = lv_f BIT-OR iv_flag.
-    ELSE.
-      " Clear flag bit
-      lv_mask = iv_flag BIT-XOR 255.  " Invert mask
-      lv_f = lv_f BIT-AND lv_mask.
-    ENDIF.
-
-    mv_af = set_low_byte( iv_pair = mv_af iv_val = lv_f ).
-  ENDMETHOD.
-
-
-  METHOD test_flag.
-    DATA(lv_f) = get_low_byte( mv_af ).
-    DATA(lv_result) = lv_f BIT-AND iv_flag.
-
-    rv_set = COND #( WHEN lv_result NE 0 THEN abap_true
-                     ELSE abap_false ).
-  ENDMETHOD.
-
-
   METHOD set_flags_byte.
     mv_af = set_low_byte( iv_pair = mv_af iv_val = iv_flags ).
   ENDMETHOD.
@@ -360,14 +388,47 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
   "=== Memory Access Methods ===
 
   METHOD read_byte.
+    " Read byte from memory (XSTRING)
+    DATA: lv_offset TYPE i,
+          lv_hex    TYPE string.
+
     DATA(lv_addr) = iv_addr MOD 65536.  " Wrap to 16-bit
-    READ TABLE mt_memory INDEX ( lv_addr + 1 ) INTO rv_val.
+    lv_offset = lv_addr * 2.  " 2 hex chars per byte
+
+    lv_hex = mv_memory+lv_offset(2).
+    rv_val = hex_to_byte( lv_hex ).
   ENDMETHOD.
 
 
   METHOD write_byte.
+    " Write byte to memory (XSTRING)
+    DATA: lv_offset TYPE i,
+          lv_hex    TYPE string,
+          lv_before TYPE string,
+          lv_after  TYPE string.
+
     DATA(lv_addr) = iv_addr MOD 65536.
-    mt_memory[ lv_addr + 1 ] = iv_val.
+    DATA(lv_byte) = iv_val MOD 256.
+    lv_offset = lv_addr * 2.
+
+    lv_hex = byte_to_hex( lv_byte ).
+
+    " Replace 2 chars at offset
+    IF lv_offset > 0.
+      lv_before = mv_memory+0(lv_offset).
+    ELSE.
+      lv_before = ''.
+    ENDIF.
+
+    DATA(lv_after_offset) = lv_offset + 2.
+    DATA(lv_remaining) = 131072 - lv_after_offset.
+    IF lv_remaining > 0.
+      lv_after = mv_memory+lv_after_offset(lv_remaining).
+    ELSE.
+      lv_after = ''.
+    ENDIF.
+
+    mv_memory = lv_before && lv_hex && lv_after.
   ENDMETHOD.
 
 
@@ -407,14 +468,16 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
   METHOD load_com_file.
     " Load CP/M .COM file into memory
     DATA: lv_offset TYPE i,
-          lv_byte   TYPE x LENGTH 1,
-          lv_len    TYPE i.
+          lv_byte   TYPE i,
+          lv_len    TYPE i,
+          lv_hex    TYPE x LENGTH 1.
 
     lv_len = xstrlen( iv_data ).
     lv_offset = 0.
 
     DO lv_len TIMES.
-      lv_byte = iv_data+lv_offset(1).
+      lv_hex = iv_data+lv_offset(1).
+      lv_byte = lv_hex.  " Implicit conversion
       write_byte( iv_addr = iv_addr + lv_offset
                   iv_val  = lv_byte ).
       lv_offset = lv_offset + 1.
@@ -489,145 +552,150 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
     DATA: lv_temp  TYPE i,
           lv_addr  TYPE i,
           lv_val   TYPE i,
-          lv_flags TYPE i.
+          lv_flags TYPE i,
+          lv_hex   TYPE string.
 
     " Default cycle count
     rv_cycles = 4.
 
     " ====== SWITCH/CASE DISPATCH ======
-    " Hybrid approach: Direct dispatch + lookup tables for flags
 
     CASE iv_opcode.
 
       " === 0x00-0x0F ===
-      WHEN '00'.  " NOP
+      WHEN 0.  " NOP
         " Do nothing
 
-      WHEN '01'.  " LD BC,nnnn
+      WHEN 1.  " LD BC,nnnn
         mv_bc = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN '02'.  " LD (BC),A
+      WHEN 2.  " LD (BC),A
         write_byte( iv_addr = mv_bc
                     iv_val  = get_high_byte( mv_af ) ).
         rv_cycles = 7.
 
-      WHEN '03'.  " INC BC
+      WHEN 3.  " INC BC
         mv_bc = ( mv_bc + 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '04'.  " INC B
+      WHEN 4.  " INC B
         mv_bc = mv_bc + 256.  " Increment high byte
         lv_temp = get_high_byte( mv_bc ).
-        " Use pre-computed table for flags (preserving carry)
-        READ TABLE mt_inc_table INDEX ( lv_temp + 1 ) INTO DATA(lv_inc_flags).
-        lv_flags = get_low_byte( mv_af ) BIT-AND c_flag_c.  " Keep carry
-        lv_flags = lv_flags BIT-OR lv_inc_flags.
+        " Use pre-computed table for flags
+        DATA(lv_offset) = lv_temp * 2.
+        lv_hex = mv_inc_table+lv_offset(2).
+        DATA(lv_inc_flags) = hex_to_byte( lv_hex ).
+        lv_flags = get_flags_byte( ) MOD 2.  " Keep carry only
+        lv_flags = lv_flags + lv_inc_flags.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN '05'.  " DEC B
+      WHEN 5.  " DEC B
         mv_bc = mv_bc - 256.  " Decrement high byte
         lv_temp = get_high_byte( mv_bc ).
-        " Use pre-computed table
-        READ TABLE mt_dec_table INDEX ( lv_temp + 1 ) INTO DATA(lv_dec_flags).
-        lv_flags = get_low_byte( mv_af ) BIT-AND c_flag_c.  " Keep carry
-        lv_flags = lv_flags BIT-OR lv_dec_flags.
+        lv_offset = lv_temp * 2.
+        lv_hex = mv_dec_table+lv_offset(2).
+        DATA(lv_dec_flags) = hex_to_byte( lv_hex ).
+        lv_flags = get_flags_byte( ) MOD 2.  " Keep carry only
+        lv_flags = lv_flags + lv_dec_flags.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN '06'.  " LD B,nn
+      WHEN 6.  " LD B,nn
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_bc = set_high_byte( iv_pair = mv_bc iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN '0A'.  " LD A,(BC)
+      WHEN 10.  " LD A,(BC)
         lv_val = read_byte( mv_bc ).
         mv_af = set_high_byte( iv_pair = mv_af iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN '0B'.  " DEC BC
+      WHEN 11.  " DEC BC
         mv_bc = ( mv_bc - 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '0C'.  " INC C
+      WHEN 12.  " INC C
         lv_temp = ( get_low_byte( mv_bc ) + 1 ) MOD 256.
         mv_bc = set_low_byte( iv_pair = mv_bc iv_val = lv_temp ).
-        " Use pre-computed table
-        READ TABLE mt_inc_table INDEX ( lv_temp + 1 ) INTO lv_inc_flags.
-        lv_flags = get_low_byte( mv_af ) BIT-AND c_flag_c.
-        lv_flags = lv_flags BIT-OR lv_inc_flags.
+        lv_offset = lv_temp * 2.
+        lv_hex = mv_inc_table+lv_offset(2).
+        lv_inc_flags = hex_to_byte( lv_hex ).
+        lv_flags = get_flags_byte( ) MOD 2.
+        lv_flags = lv_flags + lv_inc_flags.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN '0D'.  " DEC C
+      WHEN 13.  " DEC C
         lv_temp = ( get_low_byte( mv_bc ) - 1 ) MOD 256.
         mv_bc = set_low_byte( iv_pair = mv_bc iv_val = lv_temp ).
-        " Use pre-computed table
-        READ TABLE mt_dec_table INDEX ( lv_temp + 1 ) INTO lv_dec_flags.
-        lv_flags = get_low_byte( mv_af ) BIT-AND c_flag_c.
-        lv_flags = lv_flags BIT-OR lv_dec_flags.
+        lv_offset = lv_temp * 2.
+        lv_hex = mv_dec_table+lv_offset(2).
+        lv_dec_flags = hex_to_byte( lv_hex ).
+        lv_flags = get_flags_byte( ) MOD 2.
+        lv_flags = lv_flags + lv_dec_flags.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN '0E'.  " LD C,nn
+      WHEN 14.  " LD C,nn
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_bc = set_low_byte( iv_pair = mv_bc iv_val = lv_val ).
         rv_cycles = 7.
 
       " === 0x10-0x1F ===
-      WHEN '11'.  " LD DE,nnnn
+      WHEN 17.  " LD DE,nnnn
         mv_de = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN '13'.  " INC DE
+      WHEN 19.  " INC DE
         mv_de = ( mv_de + 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '1B'.  " DEC DE
+      WHEN 27.  " DEC DE
         mv_de = ( mv_de - 1 ) MOD 65536.
         rv_cycles = 6.
 
       " === 0x20-0x2F ===
-      WHEN '21'.  " LD HL,nnnn
+      WHEN 33.  " LD HL,nnnn
         mv_hl = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN '23'.  " INC HL
+      WHEN 35.  " INC HL
         mv_hl = ( mv_hl + 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '2B'.  " DEC HL
+      WHEN 43.  " DEC HL
         mv_hl = ( mv_hl - 1 ) MOD 65536.
         rv_cycles = 6.
 
       " === 0x30-0x3F ===
-      WHEN '31'.  " LD SP,nnnn
+      WHEN 49.  " LD SP,nnnn
         mv_sp = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN '33'.  " INC SP
+      WHEN 51.  " INC SP
         mv_sp = ( mv_sp + 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '3B'.  " DEC SP
+      WHEN 59.  " DEC SP
         mv_sp = ( mv_sp - 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN '76'.  " HALT
+      WHEN 118.  " HALT
         mv_status = c_status_halted.
         rv_cycles = 4.
 
-      WHEN 'C3'.  " JP nnnn (unconditional jump)
+      WHEN 195.  " JP nnnn (unconditional jump)
         mv_pc = read_word( mv_pc ).
         rv_cycles = 10.
 
-      WHEN 'C9'.  " RET (return from subroutine)
+      WHEN 201.  " RET (return from subroutine)
         mv_pc = read_word( mv_sp ).
         mv_sp = ( mv_sp + 2 ) MOD 65536.
         rv_cycles = 10.
 
-      WHEN 'CD'.  " CALL nnnn (call subroutine)
+      WHEN 205.  " CALL nnnn (call subroutine)
         lv_addr = read_word( mv_pc ).
         mv_pc = mv_pc + 2.
         " Push return address onto stack
@@ -640,7 +708,6 @@ CLASS zcl_cpu_8080 IMPLEMENTATION.
       WHEN OTHERS.
         " Unimplemented opcode - halt with error
         mv_status = c_status_halted.
-        " TODO: Add error reporting
         rv_cycles = 4.
 
     ENDCASE.
