@@ -1,0 +1,17 @@
+{
+  "global": {
+    "files": "/src/**/*.clas.abap",
+    "skipGeneratedGatewayClasses": true,
+    "skipGeneratedPersistentClasses": true,
+    "skipGeneratedFunctionGroups": true,
+    "exclude": [
+      "/src/z_test_cpu_8080.prog.abap"
+    ]
+  },
+  "dependencies": [],
+  "syntax": {
+    "version": "v702",
+    "errorNamespace": "^(Z|Y)"
+  },
+  "rules": {}
+}
