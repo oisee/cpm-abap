@@ -159,10 +159,10 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
 
   METHOD constructor.
     " Initialize memory (64KB = 131072 hex chars, all zeros)
-    DATA: lv_zeros TYPE string VALUE '00'.
-    mv_memory = ''.
-    DO 65536 TIMES.
-      mv_memory = mv_memory && lv_zeros.
+    " Use repeated self-concatenation: 2^16 = 65536 bytes
+    mv_memory = '00'.
+    DO 16 TIMES.
+      mv_memory = mv_memory && mv_memory.  " Double size each iteration
     ENDDO.
 
     " Initialize lookup tables
