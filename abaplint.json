@@ -1,17 +1,30 @@
 {
   "global": {
-    "files": "/src/**/*.clas.abap",
-    "skipGeneratedGatewayClasses": true,
-    "skipGeneratedPersistentClasses": true,
-    "skipGeneratedFunctionGroups": true,
-    "exclude": [
-      "/src/z_test_cpu_8080.prog.abap"
-    ]
+    "files": "/src/**/*.*",
+    "skipGeneratedFunctionGroups": true
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "url": "https://github.com/open-abap/open-abap-core",
+      "files": "/src/**/*.*"
+    }
+  ],
   "syntax": {
-    "version": "v702",
-    "errorNamespace": "^(Z|Y)"
+    "version": "open-abap",
+    "errorNamespace": "."
   },
-  "rules": {}
+  "rules": {
+    "begin_end_names": true,
+    "cds_parser_error": true,
+    "check_ddic": true,
+    "check_include": true,
+    "check_syntax": true,
+    "global_class": true,
+    "implement_methods": true,
+    "method_implemented_twice": true,
+    "parser_error": true,
+    "superclass_final": true,
+    "unknown_types": true,
+    "xml_consistency": true
+  }
 }
