@@ -1,17 +1,26 @@
 {
   "global": {
-    "files": "/src/**/*.clas.abap",
-    "skipGeneratedGatewayClasses": true,
-    "skipGeneratedPersistentClasses": true,
-    "skipGeneratedFunctionGroups": true,
-    "exclude": [
-      "/src/z_test_cpu_8080.prog.abap"
-    ]
+    "files": "/src/**/*.*",
+    "skipGeneratedFunctionGroups": true
   },
-  "dependencies": [],
+  "dependencies": [
+  ],
   "syntax": {
-    "version": "v702",
-    "errorNamespace": "^(Z|Y)"
+    "version": "v758",
+    "errorNamespace": "^(Z|Y|LCL_|TY_|LIF_)"
   },
-  "rules": {}
+  "rules": {
+    "begin_end_names": true,
+    "cds_parser_error": true,
+    "check_ddic": true,
+    "check_include": true,
+    "check_syntax": true,
+    "global_class": true,
+    "implement_methods": true,
+    "method_implemented_twice": true,
+    "parser_error": true,
+    "superclass_final": true,
+    "unknown_types": true,
+    "xml_consistency": true
+  }
 }
