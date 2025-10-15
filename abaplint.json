@@ -6,7 +6,7 @@
   "dependencies": [
   ],
   "syntax": {
-    "version": "v758",
+    "version": "open-abap",
     "errorNamespace": "^(Z|Y|LCL_|TY_|LIF_)"
   },
   "rules": {
