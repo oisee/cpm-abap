@@ -780,11 +780,6 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 26.  " LD E,nn
-        lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
-        mv_de = set_low_byte( iv_pair = mv_de iv_val = lv_val ).
-        rv_cycles = 7.
-
       WHEN 19.  " INC DE
         mv_de = ( mv_de + 1 ) MOD 65536.
         rv_cycles = 6.
@@ -797,6 +792,11 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
       WHEN 27.  " DEC DE
         mv_de = ( mv_de - 1 ) MOD 65536.
         rv_cycles = 6.
+
+      WHEN 30.  " LD E,nn
+        lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
+        mv_de = set_low_byte( iv_pair = mv_de iv_val = lv_val ).
+        rv_cycles = 7.
 
       WHEN 31.  " RAR (rotate right through carry)
         lv_a = get_high_byte( mv_af ).
@@ -1134,8 +1134,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         ENDIF.
 
       WHEN 205.  " CALL nnnn (call subroutine)
-        lv_addr = read_word( mv_pc ).
-        mv_pc = mv_pc + 2.
+        lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         " Push return address onto stack
         mv_sp = ( mv_sp - 2 ) MOD 65536.
         write_word( iv_addr = mv_sp iv_val = mv_pc ).
