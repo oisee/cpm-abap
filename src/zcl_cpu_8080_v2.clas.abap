@@ -1051,7 +1051,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
 
     " === 0xC0-0xFF: Immediate ops, conditional jumps, stack ops ===
     " Handle these after the main CASE
-    IF mv_status = c_status_running.
+    IF mv_status = c_status_running AND iv_opcode >= 192.
       CASE iv_opcode.
       WHEN 192.  " RET NZ
         IF get_flags_byte( ) DIV 64 MOD 2 = 0.  " Z flag clear
