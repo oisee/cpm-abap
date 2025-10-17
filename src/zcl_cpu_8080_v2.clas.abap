@@ -634,11 +634,11 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
       WHEN 0.  " NOP
         " Do nothing
 
-      WHEN 1.  " LD BC,nnnn
+      WHEN 1.  " LD BC,nnnn (Z80) / LXI B (i8080)
         mv_bc = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN 2.  " LD (BC),A
+      WHEN 2.  " LD (BC),A (Z80) / STAX B (i8080)
         write_byte( iv_addr = mv_bc
                     iv_val  = get_high_byte( mv_af ) ).
         rv_cycles = 7.
@@ -670,12 +670,12 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 6.  " LD B,nn
+      WHEN 6.  " LD B,nn (Z80) / MVI B,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_bc = set_high_byte( iv_pair = mv_bc iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN 10.  " LD A,(BC)
+      WHEN 10.  " LD A,(BC) (Z80) / LDAX B (i8080)
         lv_val = read_byte( mv_bc ).
         mv_af = set_high_byte( iv_pair = mv_af iv_val = lv_val ).
         rv_cycles = 7.
@@ -706,7 +706,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 7.  " RLC (rotate left circular)
+      WHEN 7.  " RLCA (Z80) / RLC (i8080) - Rotate left circular
         lv_a = get_high_byte( mv_af ).
         lv_bit7 = lv_a DIV 128.
         lv_result = ( lv_a * 2 + lv_bit7 ) MOD 256.
@@ -717,12 +717,12 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 14.  " LD C,nn
+      WHEN 14.  " LD C,nn (Z80) / MVI C,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_bc = set_low_byte( iv_pair = mv_bc iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN 15.  " RRC (rotate right circular)
+      WHEN 15.  " RRCA (Z80) / RRC (i8080) - Rotate right circular
         lv_a = get_high_byte( mv_af ).
         lv_bit0 = lv_a MOD 2.
         lv_result = ( lv_a DIV 2 + lv_bit0 * 128 ) MOD 256.
@@ -734,11 +734,11 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         rv_cycles = 4.
 
       " === 0x10-0x1F ===
-      WHEN 17.  " LD DE,nnnn
+      WHEN 17.  " LD DE,nnnn (Z80) / LXI D (i8080)
         mv_de = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN 18.  " LD (DE),A
+      WHEN 18.  " LD (DE),A (Z80) / STAX D (i8080)
         write_byte( iv_addr = mv_de iv_val = get_high_byte( mv_af ) ).
         rv_cycles = 7.
 
@@ -764,12 +764,12 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 22.  " MVI D,nn
+      WHEN 22.  " LD D,nn (Z80) / MVI D,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_de = set_high_byte( iv_pair = mv_de iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN 23.  " RAL (rotate left through carry)
+      WHEN 23.  " RLA (Z80) / RAL (i8080) - Rotate left through carry
         lv_a = get_high_byte( mv_af ).
         lv_carry_flag = get_flags_byte( ) MOD 2.
         lv_bit7 = lv_a DIV 128.
@@ -784,7 +784,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         mv_de = ( mv_de + 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN 26.  " LD A,(DE)
+      WHEN 26.  " LD A,(DE) (Z80) / LDAX D (i8080)
         lv_val = read_byte( mv_de ).
         set_register( iv_reg_id = 7 iv_val = lv_val ).
         rv_cycles = 7.
@@ -793,12 +793,12 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         mv_de = ( mv_de - 1 ) MOD 65536.
         rv_cycles = 6.
 
-      WHEN 30.  " LD E,nn
+      WHEN 30.  " LD E,nn (Z80) / MVI E,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_de = set_low_byte( iv_pair = mv_de iv_val = lv_val ).
         rv_cycles = 7.
 
-      WHEN 31.  " RAR (rotate right through carry)
+      WHEN 31.  " RRA (Z80) / RAR (i8080) - Rotate right through carry
         lv_a = get_high_byte( mv_af ).
         lv_carry_flag = get_flags_byte( ) MOD 2.
         lv_bit0 = lv_a MOD 2.
@@ -810,11 +810,11 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         rv_cycles = 4.
 
       " === 0x20-0x2F ===
-      WHEN 33.  " LD HL,nnnn
+      WHEN 33.  " LD HL,nnnn (Z80) / LXI H (i8080)
         mv_hl = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN 34.  " SHLD nnnn (store HL direct)
+      WHEN 34.  " LD (nnnn),HL (Z80) / SHLD nnnn (i8080) - Store HL direct
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         write_word( iv_addr = lv_addr iv_val = mv_hl ).
         rv_cycles = 16.
@@ -841,7 +841,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 38.  " MVI H,nn
+      WHEN 38.  " LD H,nn (Z80) / MVI H,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_hl = set_high_byte( iv_pair = mv_hl iv_val = lv_val ).
         rv_cycles = 7.
@@ -872,12 +872,12 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         ENDIF.
         rv_cycles = 4.
 
-      WHEN 42.  " LHLD nnnn (load HL direct)
+      WHEN 42.  " LD HL,(nnnn) (Z80) / LHLD nnnn (i8080) - Load HL direct
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         mv_hl = read_word( lv_addr ).
         rv_cycles = 16.
 
-      WHEN 46.  " LD L,nn
+      WHEN 46.  " LD L,nn (Z80) / MVI L,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         mv_hl = set_low_byte( iv_pair = mv_hl iv_val = lv_val ).
         rv_cycles = 7.
@@ -897,16 +897,16 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         rv_cycles = 6.
 
       " === 0x30-0x3F ===
-      WHEN 49.  " LD SP,nnnn
+      WHEN 49.  " LD SP,nnnn (Z80) / LXI SP,nnnn (i8080)
         mv_sp = read_word_pp( CHANGING cv_addr = mv_pc ).
         rv_cycles = 10.
 
-      WHEN 50.  " STA nnnn (store accumulator direct)
+      WHEN 50.  " LD (nnnn),A (Z80) / STA nnnn (i8080) - Store accumulator direct
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         write_byte( iv_addr = lv_addr iv_val = get_high_byte( mv_af ) ).
         rv_cycles = 13.
 
-      WHEN 52.  " INR M (increment memory at HL)
+      WHEN 52.  " INC (HL) (Z80) / INR M (i8080) - Increment memory at HL
         lv_val = read_byte( mv_hl ).
         lv_temp = ( lv_val + 1 ) MOD 256.
         write_byte( iv_addr = mv_hl iv_val = lv_temp ).
@@ -919,7 +919,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 10.
 
-      WHEN 53.  " DCR M (decrement memory at HL)
+      WHEN 53.  " DEC (HL) (Z80) / DCR M (i8080) - Decrement memory at HL
         lv_val = read_byte( mv_hl ).
         lv_temp = ( lv_val - 1 ) MOD 256.
         write_byte( iv_addr = mv_hl iv_val = lv_temp ).
@@ -932,7 +932,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 10.
 
-      WHEN 54.  " MVI M,nn (move immediate to memory at HL)
+      WHEN 54.  " LD (HL),nn (Z80) / MVI M,nn (i8080) - Load immediate to memory at HL
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         write_byte( iv_addr = mv_hl iv_val = lv_val ).
         rv_cycles = 10.
@@ -943,13 +943,13 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         set_flags_byte( lv_flags ).
         rv_cycles = 4.
 
-      WHEN 58.  " LDA nnnn (load accumulator direct)
+      WHEN 58.  " LD A,(nnnn) (Z80) / LDA nnnn (i8080) - Load accumulator direct
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         lv_val = read_byte( lv_addr ).
         set_register( iv_reg_id = 7 iv_val = lv_val ).
         rv_cycles = 13.
 
-      WHEN 62.  " MVI A,nn
+      WHEN 62.  " LD A,nn (Z80) / MVI A,nn (i8080)
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         set_register( iv_reg_id = 7 iv_val = lv_val ).
         rv_cycles = 7.
@@ -974,11 +974,11 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         rv_cycles = 4.
 
       WHEN OTHERS.
-        " === 0x40-0x7F: MOV r,r family (64 opcodes) ===
+        " === 0x40-0x7F: LD r,r family (MOV r,r in i8080) - 64 opcodes ===
         " === 0x80-0xBF: Arithmetic and Logical Operations ===
         IF iv_opcode >= 64 AND iv_opcode <= 127.
-          " MOV dst,src - bits 5-3=dest, bits 2-0=src
-          IF iv_opcode = 118.  " HALT (0x76) is exception
+          " LD dst,src (Z80) / MOV dst,src (i8080) - bits 5-3=dest, bits 2-0=src
+          IF iv_opcode = 118.  " HALT (0x76) - same in both Z80 and i8080
             mv_status = c_status_halted.
             rv_cycles = 4.
           ELSE.
@@ -993,7 +993,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
             ENDIF.
           ENDIF.
         ELSEIF iv_opcode >= 128 AND iv_opcode <= 191.
-          " ADD/ADC/SUB/SBB/AND/XOR/OR/CP with register
+          " ALU operations (same mnemonics in both Z80 and i8080): ADD/ADC/SUB/SBB/AND/XOR/OR/CP
           lv_op = ( iv_opcode - 128 ) DIV 8.
           lv_reg = ( iv_opcode - 128 ) MOD 8.
           lv_operand = get_register( lv_reg ).
@@ -1067,18 +1067,18 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         mv_sp = ( mv_sp + 2 ) MOD 65536.
         rv_cycles = 10.
 
-      WHEN 194.  " JP NZ,nnnn
+      WHEN 194.  " JP NZ,nnnn (Z80) / JNZ nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 64 MOD 2 = 0.  " Z flag clear
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 195.  " JP nnnn (unconditional jump)
+      WHEN 195.  " JP nnnn (Z80) / JMP nnnn (i8080) - Unconditional jump
         mv_pc = read_word( mv_pc ).
         rv_cycles = 10.
 
-      WHEN 196.  " CALL NZ,nnnn
+      WHEN 196.  " CALL NZ,nnnn (Z80) / CNZ nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 64 MOD 2 = 0.  " Z flag clear
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1094,14 +1094,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         write_word( iv_addr = mv_sp iv_val = mv_bc ).
         rv_cycles = 11.
 
-      WHEN 198.  " ADI nn (add immediate)
+      WHEN 198.  " ADD A,nn (Z80) / ADI nn (i8080) - Add immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_result = alu_add( iv_a = lv_a iv_b = lv_val ).
         set_register( iv_reg_id = 7 iv_val = lv_result ).
         rv_cycles = 7.
 
-      WHEN 200.  " RET Z
+      WHEN 200.  " RET Z (same in both Z80 and i8080)
         IF get_flags_byte( ) DIV 64 MOD 2 = 1.  " Z flag set
           mv_pc = read_word( mv_sp ).
           mv_sp = ( mv_sp + 2 ) MOD 65536.
@@ -1110,19 +1110,19 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 201.  " RET (return from subroutine)
+      WHEN 201.  " RET (same in both Z80 and i8080)
         mv_pc = read_word( mv_sp ).
         mv_sp = ( mv_sp + 2 ) MOD 65536.
         rv_cycles = 10.
 
-      WHEN 202.  " JP Z,nnnn
+      WHEN 202.  " JP Z,nnnn (Z80) / JZ nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 64 MOD 2 = 1.  " Z flag set
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 204.  " CALL Z,nnnn
+      WHEN 204.  " CALL Z,nnnn (Z80) / CZ nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 64 MOD 2 = 1.  " Z flag set
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1133,7 +1133,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 11.
         ENDIF.
 
-      WHEN 205.  " CALL nnnn (call subroutine)
+      WHEN 205.  " CALL nnnn (same in both Z80 and i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         " Push return address onto stack
         mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1142,7 +1142,7 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         mv_pc = lv_addr.
         rv_cycles = 17.
 
-      WHEN 206.  " ACI nn (add immediate with carry)
+      WHEN 206.  " ADC A,nn (Z80) / ACI nn (i8080) - Add immediate with carry
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_carry_flag = get_flags_byte( ) MOD 2.
@@ -1164,14 +1164,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         write_word( iv_addr = mv_sp iv_val = mv_de ).
         rv_cycles = 11.
 
-      WHEN 214.  " SUI nn (subtract immediate)
+      WHEN 214.  " SUB A,nn (Z80) / SUI nn (i8080) - Subtract immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_result = alu_sub( iv_a = lv_a iv_b = lv_val ).
         set_register( iv_reg_id = 7 iv_val = lv_result ).
         rv_cycles = 7.
 
-      WHEN 222.  " SBI nn (subtract immediate with borrow)
+      WHEN 222.  " SBC A,nn (Z80) / SBI nn (i8080) - Subtract immediate with borrow
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_carry_flag = get_flags_byte( ) MOD 2.
@@ -1193,14 +1193,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         write_word( iv_addr = mv_sp iv_val = mv_hl ).
         rv_cycles = 11.
 
-      WHEN 230.  " ANI nn (AND immediate)
+      WHEN 230.  " AND A,nn (Z80) / ANI nn (i8080) - AND immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_result = alu_and( iv_a = lv_a iv_b = lv_val ).
         set_register( iv_reg_id = 7 iv_val = lv_result ).
         rv_cycles = 7.
 
-      WHEN 238.  " XRI nn (XOR immediate)
+      WHEN 238.  " XOR A,nn (Z80) / XRI nn (i8080) - XOR immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_result = alu_xor( iv_a = lv_a iv_b = lv_val ).
@@ -1217,14 +1217,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
         write_word( iv_addr = mv_sp iv_val = mv_af ).
         rv_cycles = 11.
 
-      WHEN 246.  " ORI nn (OR immediate)
+      WHEN 246.  " OR A,nn (Z80) / ORI nn (i8080) - OR immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         lv_result = alu_or( iv_a = lv_a iv_b = lv_val ).
         set_register( iv_reg_id = 7 iv_val = lv_result ).
         rv_cycles = 7.
 
-      WHEN 254.  " CPI nn (compare immediate)
+      WHEN 254.  " CP A,nn (Z80) / CPI nn (i8080) - Compare immediate
         lv_val = read_byte_pp( CHANGING cv_addr = mv_pc ).
         lv_a = get_high_byte( mv_af ).
         alu_cp( iv_a = lv_a iv_b = lv_val ).
@@ -1240,14 +1240,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 210.  " JP NC,nnnn
+      WHEN 210.  " JP NC,nnnn (Z80) / JNC nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) MOD 2 = 0.  " C flag clear
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 212.  " CALL NC,nnnn
+      WHEN 212.  " CALL NC,nnnn (Z80) / CNC nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) MOD 2 = 0.  " C flag clear
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1267,14 +1267,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 218.  " JP C,nnnn
+      WHEN 218.  " JP C,nnnn (Z80) / JC nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) MOD 2 = 1.  " C flag set
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 220.  " CALL C,nnnn
+      WHEN 220.  " CALL C,nnnn (Z80) / CC nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) MOD 2 = 1.  " C flag set
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1294,14 +1294,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 226.  " JP PO,nnnn
+      WHEN 226.  " JP PO,nnnn (Z80) / JPO nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 4 MOD 2 = 0.  " P flag clear
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 228.  " CALL PO,nnnn
+      WHEN 228.  " CALL PO,nnnn (Z80) / CPO nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 4 MOD 2 = 0.  " P flag clear
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1321,14 +1321,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 234.  " JP PE,nnnn
+      WHEN 234.  " JP PE,nnnn (Z80) / JPE nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 4 MOD 2 = 1.  " P flag set
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 236.  " CALL PE,nnnn
+      WHEN 236.  " CALL PE,nnnn (Z80) / CPE nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 4 MOD 2 = 1.  " P flag set
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1348,14 +1348,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 242.  " JP P,nnnn
+      WHEN 242.  " JP P,nnnn (Z80) / JP nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 128 MOD 2 = 0.  " S flag clear
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 244.  " CALL P,nnnn
+      WHEN 244.  " CALL P,nnnn (Z80) / CP nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 128 MOD 2 = 0.  " S flag clear
           mv_sp = ( mv_sp - 2 ) MOD 65536.
@@ -1375,14 +1375,14 @@ CLASS zcl_cpu_8080_v2 IMPLEMENTATION.
           rv_cycles = 5.
         ENDIF.
 
-      WHEN 250.  " JP M,nnnn
+      WHEN 250.  " JP M,nnnn (Z80) / JM nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 128 MOD 2 = 1.  " S flag set
           mv_pc = lv_addr.
         ENDIF.
         rv_cycles = 10.
 
-      WHEN 252.  " CALL M,nnnn
+      WHEN 252.  " CALL M,nnnn (Z80) / CM nnnn (i8080)
         lv_addr = read_word_pp( CHANGING cv_addr = mv_pc ).
         IF get_flags_byte( ) DIV 128 MOD 2 = 1.  " S flag set
           mv_sp = ( mv_sp - 2 ) MOD 65536.
