@@ -9,3 +9,4 @@ output/
 
 # npm
 package-lock.json
+.mcp*.json
