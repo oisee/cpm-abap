@@ -1,6 +1,7 @@
 *&---------------------------------------------------------------------*
 *& Z-Machine Interpreter - Common Types Interface
 *& Version 3 compatible (Zork I, II, III)
+*& Naming: TS_ = structure, TT_ = table, TY_ = scalar, TTR_ = range
 *&---------------------------------------------------------------------*
 INTERFACE zif_zork_00_types
   PUBLIC.
@@ -65,39 +66,84 @@ INTERFACE zif_zork_00_types
     c_status_quit    TYPE i VALUE 3.
 
   "======================================================================
-  " Structured Types
+  " Scalar Types (TY_)
   "======================================================================
   TYPES:
-    " Decoded instruction
-    BEGIN OF ty_instruction,
-      opcode      TYPE i,        " Opcode number (0-255)
-      form        TYPE i,        " Instruction form (short/long/var/ext)
-      op_count    TYPE i,        " Operand count type (0OP/1OP/2OP/VAR)
-      operand_cnt TYPE i,        " Actual number of operands
-      operands    TYPE string,   " Operand values as hex (up to 8 words)
-      op_types    TYPE string,   " Operand types as hex (up to 8 bytes)
-      has_store   TYPE abap_bool," Does instruction store result?
-      store_var   TYPE i,        " Variable to store result
-      has_branch  TYPE abap_bool," Does instruction branch?
-      branch_on   TYPE abap_bool," Branch on true or false?
-      branch_off  TYPE i,        " Branch offset
-      text_addr   TYPE i,        " Address of embedded text (print/print_ret)
-      instr_len   TYPE i,        " Total instruction length in bytes
-    END OF ty_instruction,
+    ty_word    TYPE i,   " 16-bit Z-machine word (0-65535)
+    ty_byte    TYPE i,   " 8-bit byte (0-255)
+    ty_address TYPE i,   " Memory address
+    ty_packed  TYPE i.   " Packed address
 
-    " Call stack frame
-    BEGIN OF ty_frame,
-      return_pc   TYPE i,        " Return address (PC after call)
-      result_var  TYPE i,        " Where to store result (-1 = discard)
-      num_locals  TYPE i,        " Number of local variables (0-15)
-      locals      TYPE string,   " Local variables as hex (30 chars = 15 words)
-      eval_stack  TYPE string,   " Evaluation stack as hex
-      stack_ptr   TYPE i,        " Evaluation stack pointer
-      arg_count   TYPE i,        " Number of arguments supplied (v5+)
-    END OF ty_frame,
+  "======================================================================
+  " Operand Structure and Table
+  "======================================================================
+  TYPES:
+    BEGIN OF ts_operand,
+      type  TYPE i,      " Operand type (c_optype_*)
+      value TYPE i,      " Operand value (resolved)
+    END OF ts_operand,
 
-    " Header information
-    BEGIN OF ty_header,
+    tt_operands TYPE STANDARD TABLE OF ts_operand WITH EMPTY KEY.
+
+  "======================================================================
+  " Decoded Instruction Structure
+  "======================================================================
+  TYPES:
+    BEGIN OF ts_instruction,
+      address     TYPE i,            " Memory address of instruction
+      opcode      TYPE i,            " Opcode number (0-255)
+      form        TYPE i,            " Instruction form (short/long/var/ext)
+      op_count    TYPE i,            " Operand count type (0OP/1OP/2OP/VAR)
+      operands    TYPE tt_operands,  " Operands table
+      has_store   TYPE abap_bool,    " Does instruction store result?
+      store_var   TYPE i,            " Variable to store result
+      has_branch  TYPE abap_bool,    " Does instruction branch?
+      branch_on   TYPE abap_bool,    " Branch on true or false?
+      branch_off  TYPE i,            " Branch offset
+      text_addr   TYPE i,            " Address of embedded text (print/print_ret)
+      instr_len   TYPE i,            " Total instruction length in bytes
+      next_pc     TYPE i,            " PC after this instruction
+    END OF ts_instruction,
+
+    tt_instructions TYPE STANDARD TABLE OF ts_instruction WITH KEY address.
+
+  "======================================================================
+  " Local Variable Table (for call frames)
+  "======================================================================
+  TYPES:
+    BEGIN OF ts_local,
+      index TYPE i,     " Local variable number (1-15)
+      value TYPE i,     " Value (signed 16-bit: -32768 to 32767)
+    END OF ts_local,
+
+    tt_locals TYPE STANDARD TABLE OF ts_local WITH KEY index.
+
+  "======================================================================
+  " Evaluation Stack (per frame)
+  "======================================================================
+  TYPES:
+    tt_eval_stack TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+
+  "======================================================================
+  " Call Stack Frame Structure
+  "======================================================================
+  TYPES:
+    BEGIN OF ts_frame,
+      return_pc   TYPE i,             " Return address (PC after call)
+      result_var  TYPE i,             " Where to store result (-1 = discard)
+      num_locals  TYPE i,             " Number of local variables (0-15)
+      locals      TYPE tt_locals,     " Local variables table
+      eval_stack  TYPE tt_eval_stack, " Evaluation stack
+      arg_count   TYPE i,             " Number of arguments supplied (v5+)
+    END OF ts_frame,
+
+    tt_frames TYPE STANDARD TABLE OF ts_frame WITH EMPTY KEY.
+
+  "======================================================================
+  " Header Information Structure
+  "======================================================================
+  TYPES:
+    BEGIN OF ts_header,
       version     TYPE i,        " Z-machine version (1-8)
       flags1      TYPE i,        " Flags 1
       high_mem    TYPE i,        " Base of high memory
@@ -110,6 +156,14 @@ INTERFACE zif_zork_00_types
       abbrev      TYPE i,        " Abbreviations table address
       file_len    TYPE i,        " File length (actual)
       checksum    TYPE i,        " Story file checksum
-    END OF ty_header.
+    END OF ts_header.
+
+  "======================================================================
+  " Backward compatibility aliases (deprecated - use TS_/TT_ versions)
+  "======================================================================
+  TYPES:
+    ty_instruction TYPE ts_instruction,
+    ty_frame       TYPE ts_frame,
+    ty_header      TYPE ts_header.
 
 ENDINTERFACE.

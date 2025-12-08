@@ -285,17 +285,17 @@ CLASS zcl_zork_00_stack IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    mv_return_pc = hex_to_word( iv_frame+0(4) ).
+    mv_return_pc = hex_to_word( substring( val = iv_frame off = 0 len = 4 ) ).
 
-    DATA(lv_result) = hex_to_word( iv_frame+4(4) ).
+    DATA(lv_result) = hex_to_word( substring( val = iv_frame off = 4 len = 4 ) ).
     IF lv_result >= 32768.  " Treat as signed
       lv_result = lv_result - 65536.
     ENDIF.
     mv_result_var = lv_result.
 
-    mv_num_locals = hex_to_byte( iv_frame+8(2) ).
-    mv_locals = iv_frame+10(60).
-    mv_stack_ptr = hex_to_word( iv_frame+70(4) ).
+    mv_num_locals = hex_to_byte( substring( val = iv_frame off = 8 len = 2 ) ).
+    mv_locals = substring( val = iv_frame off = 10 len = 60 ).
+    mv_stack_ptr = hex_to_word( substring( val = iv_frame off = 70 len = 4 ) ).
 
     " Eval stack not preserved in this simple implementation
     mv_eval_stack = ''.
@@ -498,8 +498,8 @@ CLASS zcl_zork_00_stack IMPLEMENTATION.
 
   METHOD hex_to_word.
     IF strlen( iv_hex ) >= 4.
-      DATA(lv_hi) = hex_to_byte( iv_hex+0(2) ).
-      DATA(lv_lo) = hex_to_byte( iv_hex+2(2) ).
+      DATA(lv_hi) = hex_to_byte( substring( val = iv_hex off = 0 len = 2 ) ).
+      DATA(lv_lo) = hex_to_byte( substring( val = iv_hex off = 2 len = 2 ) ).
       rv_word = lv_hi * 256 + lv_lo.
     ELSE.
       rv_word = 0.

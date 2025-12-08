@@ -1,6 +1,6 @@
 *&---------------------------------------------------------------------*
 *& Z-Machine Instruction Decoder
-*& Decodes Z-machine instructions from memory
+*& Decodes Z-machine instructions from memory into structured format
 *& Supports v3 instruction formats (short, long, variable)
 *&---------------------------------------------------------------------*
 CLASS zcl_zork_00_decoder DEFINITION
@@ -14,32 +14,32 @@ CLASS zcl_zork_00_decoder DEFINITION
       constructor
         IMPORTING io_memory TYPE REF TO zcl_zork_00_memory,
 
-      " Main decode method
+      " Main decode method - decode single instruction
       decode
         IMPORTING iv_pc           TYPE i
-        EXPORTING ev_next_pc      TYPE i
-        RETURNING VALUE(rs_instr) TYPE zif_zork_00_types=>ty_instruction,
+        RETURNING VALUE(rs_instr) TYPE zif_zork_00_types=>ts_instruction,
 
-      " Get operand value from decoded instruction
+      " Decode multiple instructions (for analysis/disassembly)
+      decode_range
+        IMPORTING iv_start_pc     TYPE i
+                  iv_count        TYPE i DEFAULT 10
+        RETURNING VALUE(rt_instr) TYPE zif_zork_00_types=>tt_instructions,
+
+      " Get operand value from decoded instruction (convenience method)
       get_operand
-        IMPORTING is_instr       TYPE zif_zork_00_types=>ty_instruction
+        IMPORTING is_instr       TYPE zif_zork_00_types=>ts_instruction
                   iv_index       TYPE i
         RETURNING VALUE(rv_val)  TYPE i,
 
-      " Get operand type from decoded instruction
+      " Get operand type from decoded instruction (convenience method)
       get_operand_type
-        IMPORTING is_instr       TYPE zif_zork_00_types=>ty_instruction
+        IMPORTING is_instr       TYPE zif_zork_00_types=>ts_instruction
                   iv_index       TYPE i
         RETURNING VALUE(rv_type) TYPE i.
 
   PRIVATE SECTION.
 
     DATA: mo_memory TYPE REF TO zcl_zork_00_memory.
-
-    "======================================================================
-    " Opcode Information Tables
-    " Which opcodes have store/branch for each operand count
-    "======================================================================
 
     METHODS:
       " Decode operand types byte into individual types
@@ -56,6 +56,12 @@ CLASS zcl_zork_00_decoder DEFINITION
                   iv_pc_in        TYPE i
         EXPORTING ev_pc_out       TYPE i
                   ev_val          TYPE i,
+
+      " Add operand to instruction
+      add_operand
+        IMPORTING iv_type  TYPE i
+                  iv_value TYPE i
+        CHANGING  cs_instr TYPE zif_zork_00_types=>ts_instruction,
 
       " Check if opcode stores a result
       has_store
@@ -74,39 +80,7 @@ CLASS zcl_zork_00_decoder DEFINITION
         IMPORTING iv_pc_in        TYPE i
         EXPORTING ev_pc_out       TYPE i
                   ev_on_true      TYPE abap_bool
-                  ev_offset       TYPE i,
-
-      " Helper: store operand value to hex string
-      store_operand_hex
-        IMPORTING iv_index        TYPE i
-                  iv_val          TYPE i
-        CHANGING  cv_operands     TYPE string,
-
-      " Helper: store operand type
-      store_type_hex
-        IMPORTING iv_index        TYPE i
-                  iv_type         TYPE i
-        CHANGING  cv_types        TYPE string,
-
-      " Convert word to hex (4 chars)
-      word_to_hex
-        IMPORTING iv_word         TYPE i
-        RETURNING VALUE(rv_hex)   TYPE string,
-
-      " Convert hex to word
-      hex_to_word
-        IMPORTING iv_hex          TYPE string
-        RETURNING VALUE(rv_word)  TYPE i,
-
-      " Convert byte to hex (2 chars)
-      byte_to_hex
-        IMPORTING iv_byte         TYPE i
-        RETURNING VALUE(rv_hex)   TYPE string,
-
-      " Convert hex to byte
-      hex_to_byte
-        IMPORTING iv_hex          TYPE string
-        RETURNING VALUE(rv_byte)  TYPE i.
+                  ev_offset       TYPE i.
 
 ENDCLASS.
 
@@ -130,10 +104,10 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
           lv_type2    TYPE i,
           lv_type3    TYPE i,
           lv_type4    TYPE i,
-          lv_op_val   TYPE i,
-          lv_i        TYPE i.
+          lv_op_val   TYPE i.
 
     CLEAR rs_instr.
+    rs_instr-address = iv_pc.
     lv_pc = iv_pc.
 
     " Read first byte
@@ -167,49 +141,33 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
                     ev_type4 = lv_type4 ).
 
         " Read operands based on types
-        rs_instr-operand_cnt = 0.
-        rs_instr-operands = ''.
-        rs_instr-op_types = ''.
-
         IF lv_type1 <> zif_zork_00_types=>c_optype_omit.
           read_operand(
             EXPORTING iv_type = lv_type1 iv_pc_in = lv_pc
             IMPORTING ev_pc_out = lv_pc ev_val = lv_op_val ).
-          store_operand_hex( EXPORTING iv_index = 0 iv_val = lv_op_val
-                             CHANGING cv_operands = rs_instr-operands ).
-          store_type_hex( EXPORTING iv_index = 0 iv_type = lv_type1
-                          CHANGING cv_types = rs_instr-op_types ).
-          rs_instr-operand_cnt = 1.
+          add_operand( EXPORTING iv_type = lv_type1 iv_value = lv_op_val
+                       CHANGING cs_instr = rs_instr ).
 
           IF lv_type2 <> zif_zork_00_types=>c_optype_omit.
             read_operand(
               EXPORTING iv_type = lv_type2 iv_pc_in = lv_pc
               IMPORTING ev_pc_out = lv_pc ev_val = lv_op_val ).
-            store_operand_hex( EXPORTING iv_index = 1 iv_val = lv_op_val
-                               CHANGING cv_operands = rs_instr-operands ).
-            store_type_hex( EXPORTING iv_index = 1 iv_type = lv_type2
-                            CHANGING cv_types = rs_instr-op_types ).
-            rs_instr-operand_cnt = 2.
+            add_operand( EXPORTING iv_type = lv_type2 iv_value = lv_op_val
+                         CHANGING cs_instr = rs_instr ).
 
             IF lv_type3 <> zif_zork_00_types=>c_optype_omit.
               read_operand(
                 EXPORTING iv_type = lv_type3 iv_pc_in = lv_pc
                 IMPORTING ev_pc_out = lv_pc ev_val = lv_op_val ).
-              store_operand_hex( EXPORTING iv_index = 2 iv_val = lv_op_val
-                                 CHANGING cv_operands = rs_instr-operands ).
-              store_type_hex( EXPORTING iv_index = 2 iv_type = lv_type3
-                              CHANGING cv_types = rs_instr-op_types ).
-              rs_instr-operand_cnt = 3.
+              add_operand( EXPORTING iv_type = lv_type3 iv_value = lv_op_val
+                           CHANGING cs_instr = rs_instr ).
 
               IF lv_type4 <> zif_zork_00_types=>c_optype_omit.
                 read_operand(
                   EXPORTING iv_type = lv_type4 iv_pc_in = lv_pc
                   IMPORTING ev_pc_out = lv_pc ev_val = lv_op_val ).
-                store_operand_hex( EXPORTING iv_index = 3 iv_val = lv_op_val
-                                   CHANGING cv_operands = rs_instr-operands ).
-                store_type_hex( EXPORTING iv_index = 3 iv_type = lv_type4
-                                CHANGING cv_types = rs_instr-op_types ).
-                rs_instr-operand_cnt = 4.
+                add_operand( EXPORTING iv_type = lv_type4 iv_value = lv_op_val
+                             CHANGING cs_instr = rs_instr ).
               ENDIF.
             ENDIF.
           ENDIF.
@@ -223,18 +181,14 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
 
         IF lv_optype = 3.  " Type 11 = no operand
           rs_instr-op_count = zif_zork_00_types=>c_opcount_0op.
-          rs_instr-operand_cnt = 0.
-          rs_instr-operands = ''.
-          rs_instr-op_types = ''.
         ELSE.
           rs_instr-op_count = zif_zork_00_types=>c_opcount_1op.
-          rs_instr-operand_cnt = 1.
           " Read the one operand
           read_operand(
             EXPORTING iv_type = lv_optype iv_pc_in = lv_pc
             IMPORTING ev_pc_out = lv_pc ev_val = lv_op_val ).
-          rs_instr-operands = word_to_hex( lv_op_val ).
-          rs_instr-op_types = byte_to_hex( lv_optype ).
+          add_operand( EXPORTING iv_type = lv_optype iv_value = lv_op_val
+                       CHANGING cs_instr = rs_instr ).
         ENDIF.
 
       WHEN OTHERS.  " 00xxxxxx or 01xxxxxx = Long form
@@ -259,16 +213,13 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
         " Read two operands (both 1-byte each in long form)
         lv_op_val = mo_memory->read_byte( lv_pc ).
         lv_pc = lv_pc + 1.
-        rs_instr-operands = word_to_hex( lv_op_val ).
-        rs_instr-op_types = byte_to_hex( lv_type1 ).
+        add_operand( EXPORTING iv_type = lv_type1 iv_value = lv_op_val
+                     CHANGING cs_instr = rs_instr ).
 
         lv_op_val = mo_memory->read_byte( lv_pc ).
         lv_pc = lv_pc + 1.
-        store_operand_hex( EXPORTING iv_index = 1 iv_val = lv_op_val
-                           CHANGING cv_operands = rs_instr-operands ).
-        store_type_hex( EXPORTING iv_index = 1 iv_type = lv_type2
-                        CHANGING cv_types = rs_instr-op_types ).
-        rs_instr-operand_cnt = 2.
+        add_operand( EXPORTING iv_type = lv_type2 iv_value = lv_op_val
+                     CHANGING cs_instr = rs_instr ).
     ENDCASE.
 
     " Check for store byte
@@ -307,9 +258,37 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
       ENDIF.
     ENDIF.
 
-    " Calculate instruction length and return next PC
+    " Calculate instruction length and set next PC
     rs_instr-instr_len = lv_pc - iv_pc.
-    ev_next_pc = lv_pc.
+    rs_instr-next_pc = lv_pc.
+  ENDMETHOD.
+
+
+  METHOD decode_range.
+    " Decode multiple instructions starting at given PC
+    DATA: lv_pc    TYPE i,
+          ls_instr TYPE zif_zork_00_types=>ts_instruction,
+          lv_cnt   TYPE i.
+
+    lv_pc = iv_start_pc.
+    lv_cnt = 0.
+
+    WHILE lv_cnt < iv_count.
+      ls_instr = decode( lv_pc ).
+      APPEND ls_instr TO rt_instr.
+      lv_pc = ls_instr-next_pc.
+      lv_cnt = lv_cnt + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+
+  METHOD add_operand.
+    " Add operand to instruction's operands table
+    DATA: ls_operand TYPE zif_zork_00_types=>ts_operand.
+
+    ls_operand-type = iv_type.
+    ls_operand-value = iv_value.
+    APPEND ls_operand TO cs_instr-operands.
   ENDMETHOD.
 
 
@@ -476,20 +455,19 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
 
 
   METHOD get_operand.
-    " Extract operand value from instruction
-    DATA: lv_offset TYPE i,
-          lv_hex    TYPE string.
+    " Get operand value by index from decoded instruction
+    DATA(lv_count) = lines( is_instr-operands ).
 
-    IF iv_index < 0 OR iv_index >= is_instr-operand_cnt.
+    IF iv_index < 0 OR iv_index >= lv_count.
       rv_val = 0.
       RETURN.
     ENDIF.
 
-    " Each operand stored as 4 hex chars (word)
-    lv_offset = iv_index * 4.
-    IF lv_offset + 4 <= strlen( is_instr-operands ).
-      lv_hex = is_instr-operands+lv_offset(4).
-      rv_val = hex_to_word( lv_hex ).
+    " Tables are 1-indexed in ABAP
+    DATA(lv_idx) = iv_index + 1.
+    READ TABLE is_instr-operands INDEX lv_idx INTO DATA(ls_op).
+    IF sy-subrc = 0.
+      rv_val = ls_op-value.
     ELSE.
       rv_val = 0.
     ENDIF.
@@ -497,249 +475,22 @@ CLASS zcl_zork_00_decoder IMPLEMENTATION.
 
 
   METHOD get_operand_type.
-    " Extract operand type from instruction
-    DATA: lv_offset TYPE i,
-          lv_hex    TYPE string.
+    " Get operand type by index from decoded instruction
+    DATA(lv_count) = lines( is_instr-operands ).
 
-    IF iv_index < 0 OR iv_index >= is_instr-operand_cnt.
+    IF iv_index < 0 OR iv_index >= lv_count.
       rv_type = zif_zork_00_types=>c_optype_omit.
       RETURN.
     ENDIF.
 
-    " Each type stored as 2 hex chars (byte)
-    lv_offset = iv_index * 2.
-    IF lv_offset + 2 <= strlen( is_instr-op_types ).
-      lv_hex = is_instr-op_types+lv_offset(2).
-      rv_type = hex_to_byte( lv_hex ).
+    " Tables are 1-indexed in ABAP
+    DATA(lv_idx) = iv_index + 1.
+    READ TABLE is_instr-operands INDEX lv_idx INTO DATA(ls_op).
+    IF sy-subrc = 0.
+      rv_type = ls_op-type.
     ELSE.
       rv_type = zif_zork_00_types=>c_optype_omit.
     ENDIF.
-  ENDMETHOD.
-
-
-  METHOD store_operand_hex.
-    " Store operand value at given index in hex string
-    DATA: lv_hex TYPE string,
-          lv_offset TYPE i,
-          lv_needed TYPE i,
-          lv_before TYPE string,
-          lv_after TYPE string,
-          lv_len TYPE i.
-
-    lv_hex = word_to_hex( iv_val ).
-    lv_offset = iv_index * 4.
-    lv_needed = lv_offset + 4.
-
-    " Pad operands string if needed
-    WHILE strlen( cv_operands ) < lv_needed.
-      cv_operands = cv_operands && '0000'.
-    ENDWHILE.
-
-    " Replace at position
-    lv_len = strlen( cv_operands ).
-    IF lv_offset > 0.
-      lv_before = cv_operands+0(lv_offset).
-    ELSE.
-      lv_before = ''.
-    ENDIF.
-
-    IF lv_offset + 4 < lv_len.
-      DATA(lv_rem) = lv_len - lv_offset - 4.
-      DATA(lv_start) = lv_offset + 4.
-      lv_after = cv_operands+lv_start(lv_rem).
-    ELSE.
-      lv_after = ''.
-    ENDIF.
-
-    cv_operands = lv_before && lv_hex && lv_after.
-  ENDMETHOD.
-
-
-  METHOD store_type_hex.
-    " Store operand type at given index in hex string
-    DATA: lv_hex TYPE string,
-          lv_offset TYPE i,
-          lv_needed TYPE i,
-          lv_before TYPE string,
-          lv_after TYPE string,
-          lv_len TYPE i.
-
-    lv_hex = byte_to_hex( iv_type ).
-    lv_offset = iv_index * 2.
-    lv_needed = lv_offset + 2.
-
-    " Pad types string if needed
-    WHILE strlen( cv_types ) < lv_needed.
-      cv_types = cv_types && '00'.
-    ENDWHILE.
-
-    " Replace at position
-    lv_len = strlen( cv_types ).
-    IF lv_offset > 0.
-      lv_before = cv_types+0(lv_offset).
-    ELSE.
-      lv_before = ''.
-    ENDIF.
-
-    IF lv_offset + 2 < lv_len.
-      DATA(lv_rem) = lv_len - lv_offset - 2.
-      DATA(lv_start) = lv_offset + 2.
-      lv_after = cv_types+lv_start(lv_rem).
-    ELSE.
-      lv_after = ''.
-    ENDIF.
-
-    cv_types = lv_before && lv_hex && lv_after.
-  ENDMETHOD.
-
-
-  METHOD word_to_hex.
-    " Convert 16-bit word to 4-char hex string
-    DATA: lv_hi TYPE i,
-          lv_lo TYPE i.
-
-    lv_hi = iv_word DIV 256.
-    lv_lo = iv_word MOD 256.
-
-    IF lv_hi < 0.
-      lv_hi = lv_hi + 256.
-    ENDIF.
-    IF lv_lo < 0.
-      lv_lo = lv_lo + 256.
-    ENDIF.
-
-    rv_hex = byte_to_hex( lv_hi ) && byte_to_hex( lv_lo ).
-  ENDMETHOD.
-
-
-  METHOD hex_to_word.
-    " Convert 4-char hex string to 16-bit word
-    DATA: lv_hi TYPE i,
-          lv_lo TYPE i.
-
-    IF strlen( iv_hex ) >= 4.
-      lv_hi = hex_to_byte( iv_hex+0(2) ).
-      lv_lo = hex_to_byte( iv_hex+2(2) ).
-      rv_word = lv_hi * 256 + lv_lo.
-    ELSE.
-      rv_word = 0.
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD byte_to_hex.
-    " Convert byte to 2-char hex string
-    DATA: lv_high TYPE i,
-          lv_low  TYPE i,
-          lv_c1   TYPE string,
-          lv_c2   TYPE string.
-
-    DATA(lv_val) = iv_byte MOD 256.
-    IF lv_val < 0.
-      lv_val = lv_val + 256.
-    ENDIF.
-
-    lv_high = lv_val DIV 16.
-    lv_low = lv_val MOD 16.
-
-    CASE lv_high.
-      WHEN 0.  lv_c1 = '0'.
-      WHEN 1.  lv_c1 = '1'.
-      WHEN 2.  lv_c1 = '2'.
-      WHEN 3.  lv_c1 = '3'.
-      WHEN 4.  lv_c1 = '4'.
-      WHEN 5.  lv_c1 = '5'.
-      WHEN 6.  lv_c1 = '6'.
-      WHEN 7.  lv_c1 = '7'.
-      WHEN 8.  lv_c1 = '8'.
-      WHEN 9.  lv_c1 = '9'.
-      WHEN 10. lv_c1 = 'A'.
-      WHEN 11. lv_c1 = 'B'.
-      WHEN 12. lv_c1 = 'C'.
-      WHEN 13. lv_c1 = 'D'.
-      WHEN 14. lv_c1 = 'E'.
-      WHEN 15. lv_c1 = 'F'.
-      WHEN OTHERS. lv_c1 = '0'.
-    ENDCASE.
-
-    CASE lv_low.
-      WHEN 0.  lv_c2 = '0'.
-      WHEN 1.  lv_c2 = '1'.
-      WHEN 2.  lv_c2 = '2'.
-      WHEN 3.  lv_c2 = '3'.
-      WHEN 4.  lv_c2 = '4'.
-      WHEN 5.  lv_c2 = '5'.
-      WHEN 6.  lv_c2 = '6'.
-      WHEN 7.  lv_c2 = '7'.
-      WHEN 8.  lv_c2 = '8'.
-      WHEN 9.  lv_c2 = '9'.
-      WHEN 10. lv_c2 = 'A'.
-      WHEN 11. lv_c2 = 'B'.
-      WHEN 12. lv_c2 = 'C'.
-      WHEN 13. lv_c2 = 'D'.
-      WHEN 14. lv_c2 = 'E'.
-      WHEN 15. lv_c2 = 'F'.
-      WHEN OTHERS. lv_c2 = '0'.
-    ENDCASE.
-
-    rv_hex = lv_c1 && lv_c2.
-  ENDMETHOD.
-
-
-  METHOD hex_to_byte.
-    " Convert 2-char hex string to byte
-    DATA: lv_high TYPE i,
-          lv_low  TYPE i.
-
-    IF strlen( iv_hex ) < 2.
-      rv_byte = 0.
-      RETURN.
-    ENDIF.
-
-    DATA(lv_c1) = iv_hex+0(1).
-    DATA(lv_c2) = iv_hex+1(1).
-
-    CASE lv_c1.
-      WHEN '0'. lv_high = 0.
-      WHEN '1'. lv_high = 1.
-      WHEN '2'. lv_high = 2.
-      WHEN '3'. lv_high = 3.
-      WHEN '4'. lv_high = 4.
-      WHEN '5'. lv_high = 5.
-      WHEN '6'. lv_high = 6.
-      WHEN '7'. lv_high = 7.
-      WHEN '8'. lv_high = 8.
-      WHEN '9'. lv_high = 9.
-      WHEN 'A' OR 'a'. lv_high = 10.
-      WHEN 'B' OR 'b'. lv_high = 11.
-      WHEN 'C' OR 'c'. lv_high = 12.
-      WHEN 'D' OR 'd'. lv_high = 13.
-      WHEN 'E' OR 'e'. lv_high = 14.
-      WHEN 'F' OR 'f'. lv_high = 15.
-      WHEN OTHERS. lv_high = 0.
-    ENDCASE.
-
-    CASE lv_c2.
-      WHEN '0'. lv_low = 0.
-      WHEN '1'. lv_low = 1.
-      WHEN '2'. lv_low = 2.
-      WHEN '3'. lv_low = 3.
-      WHEN '4'. lv_low = 4.
-      WHEN '5'. lv_low = 5.
-      WHEN '6'. lv_low = 6.
-      WHEN '7'. lv_low = 7.
-      WHEN '8'. lv_low = 8.
-      WHEN '9'. lv_low = 9.
-      WHEN 'A' OR 'a'. lv_low = 10.
-      WHEN 'B' OR 'b'. lv_low = 11.
-      WHEN 'C' OR 'c'. lv_low = 12.
-      WHEN 'D' OR 'd'. lv_low = 13.
-      WHEN 'E' OR 'e'. lv_low = 14.
-      WHEN 'F' OR 'f'. lv_low = 15.
-      WHEN OTHERS. lv_low = 0.
-    ENDCASE.
-
-    rv_byte = lv_high * 16 + lv_low.
   ENDMETHOD.
 
 ENDCLASS.

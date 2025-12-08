@@ -33,6 +33,9 @@ CLASS ltcl_decoder_test DEFINITION
       " Store tests
       test_store_add FOR TESTING,
 
+      " Decode range test
+      test_decode_range FOR TESTING,
+
       " Helper to create test memory with code
       create_test_memory
         IMPORTING iv_code       TYPE string
@@ -90,20 +93,13 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
 
   METHOD test_short_1op_small.
     " Test short form with 1 small constant operand
-    " Example: jz 42 (opcode $A0 + operand type 01 in bits 5-4)
-    " $A0 = 10 100 000 = short form, type 01 (small), opcode 0 (jz)
-    " Byte: $90 = 10 01 0000 = short, small const, opcode 0
-    " Actually: jz with small constant = $80 | (01 << 4) | 0 = $90
-
     " jz with small operand: form=short, optype=01, opcode=0
     " Encoding: 10 01 0000 = $90, then operand byte, then branch
     " Let's use: $90 $2A $C0 (jz 42, branch true +0 = return true)
     mo_memory = create_test_memory( '902AC0' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-form
@@ -121,7 +117,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Opcode should be 0 (jz)' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = ls_instr-operand_cnt
+      act = lines( ls_instr-operands )
       exp = 1
       msg = 'Should have 1 operand' ).
 
@@ -140,17 +136,12 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
 
   METHOD test_short_1op_large.
     " Test short form with 1 large constant operand
-    " inc with large constant: 10 00 0101 = $85, then 2-byte operand
-    " $85 $01 $00 = inc with large constant $0100 (256)
-    " Actually inc is opcode 5 (1OP), but it doesn't take large const...
-    " Let's use print_addr (1OP:7) which takes a large constant
+    " print_addr (1OP:7) which takes a large constant
     " 10 00 0111 = $87, operand $1234
     mo_memory = create_test_memory( '871234' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-opcode
@@ -164,7 +155,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Operand should be 0x1234' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = lv_next
+      act = ls_instr-next_pc
       exp = 67
       msg = 'Next PC should be 67 (64+3)' ).
   ENDMETHOD.
@@ -177,9 +168,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( 'AB10' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-opcode
@@ -206,9 +195,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( 'B0' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-form
@@ -226,12 +213,12 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Opcode should be 0 (rtrue)' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = ls_instr-operand_cnt
+      act = lines( ls_instr-operands )
       exp = 0
       msg = 'Should have 0 operands' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = lv_next
+      act = ls_instr-next_pc
       exp = 65
       msg = 'Next PC should be 65' ).
   ENDMETHOD.
@@ -239,17 +226,13 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
 
   METHOD test_long_2op.
     " Test long form with 2 operands
-    " add with two small constants: 00 00 0100 = $14
-    " But add is 2OP:20 which is $14 in long form!
-    " Long: bit 6 = type1, bit 5 = type2 (0=small, 1=var)
+    " add with two small constants
     " $14 = 0001 0100 = long form, both small, opcode 20 (add)
     " $14 $05 $03 $00 = add 5 + 3, store to var 0
     mo_memory = create_test_memory( '14050300' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-form
@@ -267,7 +250,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Opcode should be 20 (add)' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = ls_instr-operand_cnt
+      act = lines( ls_instr-operands )
       exp = 2
       msg = 'Should have 2 operands' ).
 
@@ -304,9 +287,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( 'E03F123400' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-form
@@ -324,7 +305,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Opcode should be 0 (call)' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = ls_instr-operand_cnt
+      act = lines( ls_instr-operands )
       exp = 1
       msg = 'Should have 1 operand' ).
 
@@ -350,16 +331,11 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     " Test variable form storew instruction
     " storew: 11 0 00001 = $E1, then types, then operands
     " storew array index value
-    " $E1 $15 $1000 $05 $00 $FF = storew $1000, 5, var0(255)
-    " Types $15 = 00 01 01 01 = large, small, small, omit
-    " Wait, storew needs exactly 3 operands: array, word-index, value
     " Types: 00 01 01 11 = $17 (large, small, small, omit)
     mo_memory = create_test_memory( 'E117100005FF' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-opcode
@@ -367,7 +343,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Opcode should be 1 (storew)' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = ls_instr-operand_cnt
+      act = lines( ls_instr-operands )
       exp = 3
       msg = 'Should have 3 operands' ).
 
@@ -404,9 +380,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( '9000C0' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-has_branch
@@ -432,9 +406,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( '90000010' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-branch_on
@@ -447,7 +419,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Branch offset should be 16' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = lv_next
+      act = ls_instr-next_pc
       exp = 68
       msg = 'Next PC should be 68 (64+4)' ).
   ENDMETHOD.
@@ -460,9 +432,7 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
     mo_memory = create_test_memory( '140A0510' ).
     CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
 
-    DATA(ls_instr) = mo_decoder->decode(
-      EXPORTING iv_pc = 64
-      IMPORTING ev_next_pc = DATA(lv_next) ).
+    DATA(ls_instr) = mo_decoder->decode( 64 ).
 
     cl_abap_unit_assert=>assert_equals(
       act = ls_instr-has_store
@@ -475,9 +445,47 @@ CLASS ltcl_decoder_test IMPLEMENTATION.
       msg = 'Store to global var 16' ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = lv_next
+      act = ls_instr-next_pc
       exp = 68
       msg = 'Next PC should be 68' ).
+  ENDMETHOD.
+
+
+  METHOD test_decode_range.
+    " Test decoding multiple instructions
+    " B0 = rtrue (1 byte)
+    " B1 = rfalse (1 byte)
+    " B0 = rtrue (1 byte)
+    mo_memory = create_test_memory( 'B0B1B0' ).
+    CREATE OBJECT mo_decoder EXPORTING io_memory = mo_memory.
+
+    DATA(lt_instr) = mo_decoder->decode_range(
+      iv_start_pc = 64
+      iv_count    = 3 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_instr )
+      exp = 3
+      msg = 'Should decode 3 instructions' ).
+
+    READ TABLE lt_instr INDEX 1 INTO DATA(ls_i1).
+    READ TABLE lt_instr INDEX 2 INTO DATA(ls_i2).
+    READ TABLE lt_instr INDEX 3 INTO DATA(ls_i3).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_i1-opcode
+      exp = 0
+      msg = 'First instruction should be rtrue (opcode 0)' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_i2-opcode
+      exp = 1
+      msg = 'Second instruction should be rfalse (opcode 1)' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_i3-address
+      exp = 66
+      msg = 'Third instruction should be at address 66' ).
   ENDMETHOD.
 
 ENDCLASS.

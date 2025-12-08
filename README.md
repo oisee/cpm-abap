@@ -1,13 +1,21 @@
-# Z80/i8080 CPU Emulator in ABAP
+# Retro Computing Emulators in ABAP
 
-A working Z80/i8080 CPU emulator implemented in ABAP, designed to run CP/M programs. Features transpiler-compatible code for local testing via Node.js.
+Two vintage computing emulators implemented in ABAP:
+1. **Z80/i8080 CPU Emulator** - For running CP/M programs
+2. **Z-Machine Interpreter** - For running Infocom interactive fiction (ZORK!)
 
-## Current Status (2025-10-19)
+## Current Status (2025-12-08)
 
+### Z-Machine Interpreter (NEW!)
+✅ **Phase 1-4 Complete** - Memory, Stack, Decoder, I/O
+✅ **4 core classes** with 30+ unit tests
+✅ **Proper ABAP types** - TS_/TT_/TY_ conventions with internal tables
+✅ **Deployed to SAP** - Ready for executor implementation
+
+### i8080 CPU Emulator
 ✅ **86 / ~105 core i8080 opcodes implemented (82%)**
 ✅ **16 unit tests, all passing**
 ✅ **Local TDD workflow operational** (transpile + test < 1 second)
-✅ **2,175 lines of ABAP code**
 
 ### Quick Start
 
@@ -37,22 +45,71 @@ npm test
 ```
 cpm-abap/
 ├── src/
-│   ├── zcl_cpu_8080_v2.clas.abap              # CPU emulator (1,716 lines)
-│   └── zcl_cpu_8080_v2.clas.testclasses.abap  # Unit tests (459 lines)
-├── output/                                     # Transpiled JavaScript (auto-generated)
-│   ├── index.mjs                               # Test runner
-│   └── zcl_cpu_8080_v2.clas.mjs                # Transpiled CPU code
-├── node_modules/                               # npm packages (transpiler + runtime)
-├── docs/
-│   ├── CONTEXT.md          # Project status and history
-│   ├── TODO.md             # Implementation plan ⭐
-│   ├── CLAUDE.md           # AI assistant instructions
-│   ├── BRAINSTORM.md       # Architecture analysis
-│   ├── TRANSPILER.md       # Transpiler setup
-│   └── SESSION_NOTES.md    # Bug fix documentation
-├── package.json            # npm dependencies
-├── abaplint.json           # Transpiler config
-└── README.md               # This file
+│   ├── zcl_cpu_8080_v2.clas.abap              # i8080 CPU emulator
+│   ├── zcl_cpu_8080_v2.clas.testclasses.abap  # i8080 unit tests
+│   │
+│   ├── zif_zork_00_types.intf.abap            # Z-machine types (TS_/TT_/TY_)
+│   ├── zif_zork_00_io.intf.abap               # Z-machine I/O interface
+│   ├── zcl_zork_00_memory.clas.abap           # Z-machine memory manager
+│   ├── zcl_zork_00_stack.clas.abap            # Z-machine call stack
+│   ├── zcl_zork_00_decoder.clas.abap          # Z-machine instruction decoder
+│   ├── zcl_zork_00_io_console.clas.abap       # Console I/O implementation
+│   └── *.testclasses.abap                     # Unit tests for each class
+│
+├── src-sap/                                    # SAP-specific files (GUI)
+│   ├── zcl_zork_00_io_html.clas.abap          # HTML/SAP GUI I/O
+│   └── zork_00_console.prog.abap              # Main program
+│
+├── output/                                     # Transpiled JavaScript
+├── node_modules/                               # npm packages
+├── docs/                                       # Documentation
+├── package.json
+├── abaplint.json
+└── README.md
+```
+
+## Z-Machine Interpreter Architecture
+
+The Z-machine is a virtual machine designed by Infocom for running interactive fiction games like ZORK.
+
+### Components (SAP Package: $ZORK_00)
+
+| Class | Purpose | Tests |
+|-------|---------|-------|
+| `ZIF_ZORK_00_TYPES` | Type definitions (TS_/TT_/TY_ conventions) | - |
+| `ZIF_ZORK_00_IO` | I/O interface for text/screen | - |
+| `ZCL_ZORK_00_MEMORY` | Story file loading, byte/word access, Z-strings | 10 |
+| `ZCL_ZORK_00_STACK` | Call frames, locals, evaluation stack | ✅ |
+| `ZCL_ZORK_00_DECODER` | Instruction decoding → `TT_INSTRUCTIONS` table | 11 |
+| `ZCL_ZORK_00_IO_CONSOLE` | Console-based I/O implementation | 9 |
+
+### Key Type Definitions
+
+```abap
+" Decoded instruction with operands as internal table
+TYPES: BEGIN OF ts_instruction,
+         address   TYPE i,
+         opcode    TYPE i,
+         operands  TYPE tt_operands,  " Internal table!
+         has_store TYPE abap_bool,
+         store_var TYPE i,
+         ...
+       END OF ts_instruction.
+
+" Table of decoded instructions (for analysis/caching)
+TYPES: tt_instructions TYPE STANDARD TABLE OF ts_instruction WITH KEY address.
+```
+
+### Decode → Execute Architecture
+
+```
+   Z-code bytes     ┌─────────────┐     ts_instruction      ┌──────────────┐
+  ───────────────►  │   DECODER   │  ─────────────────────► │   EXECUTOR   │
+                    │  decode()   │     (structured)        │  execute()   │
+                    └─────────────┘                         └──────────────┘
+                                                                   │
+                                                                   ▼
+                                                            Game output
 ```
 
 ## What's Implemented
@@ -339,15 +396,20 @@ Educational/experimental project. RunCPM reference implementation is MIT license
 
 ## Next Milestones
 
-🎯 **Immediate:** Complete i8080 instruction set (~19 opcodes, 4-6 hours)
-🎯 **Short term:** Run 8080 Exerciser test suite (validate all instructions)
-🎯 **Medium term:** CP/M BDOS emulation (console I/O, file I/O)
-🎯 **Long term:** Run real CP/M programs (ZORK, Turbo Pascal, MBASIC)
+### Z-Machine Interpreter
+🎯 **Immediate:** Implement `ZCL_ZORK_00_EXECUTOR` - instruction execution engine
+🎯 **Short term:** Implement core opcodes (arithmetic, branches, calls)
+🎯 **Medium term:** Object table, dictionary, parser
+🎯 **Long term:** Run ZORK I in SAP GUI!
 
-See **[TODO.md](TODO.md)** for detailed plan and timeline.
+### i8080 CPU Emulator
+🎯 **Immediate:** Complete i8080 instruction set (~19 opcodes)
+🎯 **Short term:** Run 8080 Exerciser test suite
+🎯 **Medium term:** CP/M BDOS emulation
+🎯 **Long term:** Run CP/M programs (Turbo Pascal, MBASIC)
 
 ---
 
-*Built with ABAP, validated by industry-standard test suites, documented for the future* 🚀
+*Retro computing in ABAP - because why not?* 🚀
 
-*Last updated: 2025-10-19*
+*Last updated: 2025-12-08*
