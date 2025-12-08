@@ -24,6 +24,7 @@ CLASS zcl_zork_00_executor DEFINITION
         IMPORTING io_memory  TYPE REF TO zcl_zork_00_memory
                   io_stack   TYPE REF TO zcl_zork_00_stack
                   io_decoder TYPE REF TO zcl_zork_00_decoder
+                  io_objects TYPE REF TO zcl_zork_00_objects OPTIONAL
                   io_io      TYPE REF TO zif_zork_00_io OPTIONAL,
 
       " Main execution methods
@@ -57,6 +58,7 @@ CLASS zcl_zork_00_executor DEFINITION
       mo_memory  TYPE REF TO zcl_zork_00_memory,
       mo_stack   TYPE REF TO zcl_zork_00_stack,
       mo_decoder TYPE REF TO zcl_zork_00_decoder,
+      mo_objects TYPE REF TO zcl_zork_00_objects,
       mo_io      TYPE REF TO zif_zork_00_io,
       mv_pc      TYPE i,
       mv_status  TYPE i.
@@ -108,7 +110,16 @@ CLASS zcl_zork_00_executor DEFINITION
       " Z-string decoding (for print instructions)
       decode_zstring
         IMPORTING iv_addr         TYPE i
-        RETURNING VALUE(rv_text)  TYPE string.
+        RETURNING VALUE(rv_text)  TYPE string,
+
+      " Hex conversion helpers
+      word_to_hex
+        IMPORTING iv_word        TYPE i
+        RETURNING VALUE(rv_hex)  TYPE string,
+
+      byte_to_hex
+        IMPORTING iv_byte        TYPE i
+        RETURNING VALUE(rv_hex)  TYPE string.
 
 ENDCLASS.
 
@@ -120,6 +131,13 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
     mo_stack = io_stack.
     mo_decoder = io_decoder.
     mo_io = io_io.
+
+    " Create or use provided objects handler
+    IF io_objects IS BOUND.
+      mo_objects = io_objects.
+    ELSE.
+      mo_objects = NEW zcl_zork_00_objects( mo_memory ).
+    ENDIF.
 
     " Initialize PC from header
     mv_pc = mo_memory->get_init_pc( ).
@@ -419,9 +437,7 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 1.  " get_sibling - get sibling object (store + branch)
-        " Object operations - simplified for now
-        " TODO: Implement object table access
-        lv_result = 0.
+        lv_result = mo_objects->get_sibling( lv_op1 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
         IF lv_result <> 0.
           lv_cond = abap_true.
@@ -431,7 +447,7 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 2.  " get_child - get first child object (store + branch)
-        lv_result = 0.
+        lv_result = mo_objects->get_child( lv_op1 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
         IF lv_result <> 0.
           lv_cond = abap_true.
@@ -441,13 +457,11 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 3.  " get_parent - get parent object (store)
-        lv_result = 0.
+        lv_result = mo_objects->get_parent( lv_op1 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 4.  " get_prop_len - get property data length
-        " Property address -> property length
-        " Simplified: return 0 for now
-        lv_result = 0.
+        lv_result = mo_objects->get_prop_len( lv_op1 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 5.  " inc - increment variable
@@ -471,12 +485,19 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         " Skip for v3
 
       WHEN 9.  " remove_obj - remove object from tree
-        " TODO: Implement object operations
+        mo_objects->remove_obj( lv_op1 ).
 
       WHEN 10.  " print_obj - print short name of object
         IF mo_io IS BOUND.
-          " TODO: Get object name from object table
-          mo_io->print_text( |[Object { lv_op1 }]| ).
+          " Get object short name from property table
+          DATA(lv_prop_addr) = mo_objects->get_prop_table_addr( lv_op1 ).
+          IF lv_prop_addr > 0.
+            DATA(lv_text_len) = mo_memory->read_byte( lv_prop_addr ).
+            IF lv_text_len > 0.
+              lv_text = decode_zstring( lv_prop_addr + 1 ).
+              mo_io->print_text( lv_text ).
+            ENDIF.
+          ENDIF.
         ENDIF.
 
       WHEN 11.  " ret - return with value
@@ -601,8 +622,12 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 6.  " jin - jump if object in object (parent check)
-        " TODO: Implement object table
-        lv_cond = abap_false.
+        " Branch if op1's parent is op2
+        IF mo_objects->get_parent( lv_op1 ) = lv_op2.
+          lv_cond = abap_true.
+        ELSE.
+          lv_cond = abap_false.
+        ENDIF.
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 7.  " test - test bitmap
@@ -661,15 +686,14 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 10.  " test_attr - test object attribute
-        " TODO: Implement object table
-        lv_cond = abap_false.
+        lv_cond = mo_objects->test_attr( iv_object = lv_op1 iv_attr = lv_op2 ).
         rv_next_pc = handle_branch( is_instr = is_instr iv_condition = lv_cond ).
 
       WHEN 11.  " set_attr - set object attribute
-        " TODO: Implement object table
+        mo_objects->set_attr( iv_object = lv_op1 iv_attr = lv_op2 ).
 
       WHEN 12.  " clear_attr - clear object attribute
-        " TODO: Implement object table
+        mo_objects->clear_attr( iv_object = lv_op1 iv_attr = lv_op2 ).
 
       WHEN 13.  " store - store variable (indirect)
         " op1 = variable number, op2 = value
@@ -682,7 +706,7 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         ENDIF.
 
       WHEN 14.  " insert_obj - insert object in object
-        " TODO: Implement object operations
+        mo_objects->insert_obj( iv_object = lv_op1 iv_destination = lv_op2 ).
 
       WHEN 15.  " loadw - load word from array
         " op1 = array base, op2 = word index
@@ -696,18 +720,15 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 17.  " get_prop - get object property
-        " TODO: Implement object table
-        lv_result = 0.
+        lv_result = mo_objects->get_prop( iv_object = lv_op1 iv_property = lv_op2 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 18.  " get_prop_addr - get property address
-        " TODO: Implement object table
-        lv_result = 0.
+        lv_result = mo_objects->get_prop_addr( iv_object = lv_op1 iv_property = lv_op2 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 19.  " get_next_prop - get next property
-        " TODO: Implement object table
-        lv_result = 0.
+        lv_result = mo_objects->get_next_prop( iv_object = lv_op1 iv_property = lv_op2 ).
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 20.  " add - signed addition
@@ -835,7 +856,13 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         mo_memory->write_byte( iv_addr = lv_addr iv_val = lv_op3 ).
 
       WHEN 3.  " put_prop - put object property
-        " TODO: Implement object table
+        " op1 = object, op2 = property, op3 = value
+        IF lv_count >= 3.
+          DATA(lv_prop_val) = get_operand_value( is_instr = is_instr iv_index = 2 ).
+          mo_objects->put_prop( iv_object = lv_op1
+                                iv_property = lv_op2
+                                iv_value = lv_prop_val ).
+        ENDIF.
 
       WHEN 4.  " read / sread - read input line
         " For now, set status to waiting
