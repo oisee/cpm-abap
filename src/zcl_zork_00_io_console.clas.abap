@@ -73,113 +73,15 @@ CLASS zcl_zork_00_io_console IMPLEMENTATION.
 
   METHOD zif_zork_00_io~print_char.
     " Convert ZSCII code to character and append to output
-    DATA: lv_char TYPE string.
+    DATA: lv_char TYPE c LENGTH 1.
 
-    " Basic ZSCII to ASCII conversion (simplified)
-    " ZSCII 32-126 = standard ASCII printable
     " ZSCII 13 = newline
     IF iv_zscii = 13.
       mv_output = mv_output && cl_abap_char_utilities=>newline.
     ELSEIF iv_zscii >= 32 AND iv_zscii <= 126.
-      " Convert to character using code
-      CASE iv_zscii.
-        WHEN 32. lv_char = ' '.
-        WHEN 33. lv_char = '!'.
-        WHEN 34. lv_char = '"'.
-        WHEN 35. lv_char = '#'.
-        WHEN 36. lv_char = '$'.
-        WHEN 37. lv_char = '%'.
-        WHEN 38. lv_char = '&'.
-        WHEN 39. lv_char = ''''.
-        WHEN 40. lv_char = '('.
-        WHEN 41. lv_char = ')'.
-        WHEN 42. lv_char = '*'.
-        WHEN 43. lv_char = '+'.
-        WHEN 44. lv_char = ','.
-        WHEN 45. lv_char = '-'.
-        WHEN 46. lv_char = '.'.
-        WHEN 47. lv_char = '/'.
-        WHEN 48. lv_char = '0'.
-        WHEN 49. lv_char = '1'.
-        WHEN 50. lv_char = '2'.
-        WHEN 51. lv_char = '3'.
-        WHEN 52. lv_char = '4'.
-        WHEN 53. lv_char = '5'.
-        WHEN 54. lv_char = '6'.
-        WHEN 55. lv_char = '7'.
-        WHEN 56. lv_char = '8'.
-        WHEN 57. lv_char = '9'.
-        WHEN 58. lv_char = ':'.
-        WHEN 59. lv_char = ';'.
-        WHEN 60. lv_char = '<'.
-        WHEN 61. lv_char = '='.
-        WHEN 62. lv_char = '>'.
-        WHEN 63. lv_char = '?'.
-        WHEN 64. lv_char = '@'.
-        WHEN 65. lv_char = 'A'.
-        WHEN 66. lv_char = 'B'.
-        WHEN 67. lv_char = 'C'.
-        WHEN 68. lv_char = 'D'.
-        WHEN 69. lv_char = 'E'.
-        WHEN 70. lv_char = 'F'.
-        WHEN 71. lv_char = 'G'.
-        WHEN 72. lv_char = 'H'.
-        WHEN 73. lv_char = 'I'.
-        WHEN 74. lv_char = 'J'.
-        WHEN 75. lv_char = 'K'.
-        WHEN 76. lv_char = 'L'.
-        WHEN 77. lv_char = 'M'.
-        WHEN 78. lv_char = 'N'.
-        WHEN 79. lv_char = 'O'.
-        WHEN 80. lv_char = 'P'.
-        WHEN 81. lv_char = 'Q'.
-        WHEN 82. lv_char = 'R'.
-        WHEN 83. lv_char = 'S'.
-        WHEN 84. lv_char = 'T'.
-        WHEN 85. lv_char = 'U'.
-        WHEN 86. lv_char = 'V'.
-        WHEN 87. lv_char = 'W'.
-        WHEN 88. lv_char = 'X'.
-        WHEN 89. lv_char = 'Y'.
-        WHEN 90. lv_char = 'Z'.
-        WHEN 91. lv_char = '['.
-        WHEN 92. lv_char = '\'.
-        WHEN 93. lv_char = ']'.
-        WHEN 94. lv_char = '^'.
-        WHEN 95. lv_char = '_'.
-        WHEN 96. lv_char = '`'.
-        WHEN 97. lv_char = 'a'.
-        WHEN 98. lv_char = 'b'.
-        WHEN 99. lv_char = 'c'.
-        WHEN 100. lv_char = 'd'.
-        WHEN 101. lv_char = 'e'.
-        WHEN 102. lv_char = 'f'.
-        WHEN 103. lv_char = 'g'.
-        WHEN 104. lv_char = 'h'.
-        WHEN 105. lv_char = 'i'.
-        WHEN 106. lv_char = 'j'.
-        WHEN 107. lv_char = 'k'.
-        WHEN 108. lv_char = 'l'.
-        WHEN 109. lv_char = 'm'.
-        WHEN 110. lv_char = 'n'.
-        WHEN 111. lv_char = 'o'.
-        WHEN 112. lv_char = 'p'.
-        WHEN 113. lv_char = 'q'.
-        WHEN 114. lv_char = 'r'.
-        WHEN 115. lv_char = 's'.
-        WHEN 116. lv_char = 't'.
-        WHEN 117. lv_char = 'u'.
-        WHEN 118. lv_char = 'v'.
-        WHEN 119. lv_char = 'w'.
-        WHEN 120. lv_char = 'x'.
-        WHEN 121. lv_char = 'y'.
-        WHEN 122. lv_char = 'z'.
-        WHEN 123. lv_char = '{'.
-        WHEN 124. lv_char = '|'.
-        WHEN 125. lv_char = '}'.
-        WHEN 126. lv_char = '~'.
-        WHEN OTHERS. lv_char = '?'.
-      ENDCASE.
+      " Use cl_abap_conv_in_ce to convert code point to character
+      " uccpi expects TYPE i (integer), iv_zscii is already TYPE i
+      lv_char = cl_abap_conv_in_ce=>uccpi( iv_zscii ).
       mv_output = mv_output && lv_char.
     ENDIF.
   ENDMETHOD.
@@ -257,12 +159,14 @@ CLASS zcl_zork_00_io_console IMPLEMENTATION.
 
   METHOD zif_zork_00_io~read_char.
     " Get single character from input queue
+    DATA: lv_char TYPE c LENGTH 1.
+
     IF mv_input_queue = ''.
       rv_zscii = 0.
       RETURN.
     ENDIF.
 
-    DATA(lv_char) = mv_input_queue+0(1).
+    lv_char = mv_input_queue+0(1).
     DATA(lv_len) = strlen( mv_input_queue ).
 
     IF lv_len > 1.
@@ -272,38 +176,9 @@ CLASS zcl_zork_00_io_console IMPLEMENTATION.
       mv_input_queue = ''.
     ENDIF.
 
-    " Convert to ZSCII (simplified)
-    " For now, just return ASCII code
-    CASE lv_char.
-      WHEN ' '. rv_zscii = 32.
-      WHEN 'a'. rv_zscii = 97.
-      WHEN 'b'. rv_zscii = 98.
-      WHEN 'c'. rv_zscii = 99.
-      WHEN 'd'. rv_zscii = 100.
-      WHEN 'e'. rv_zscii = 101.
-      WHEN 'f'. rv_zscii = 102.
-      WHEN 'g'. rv_zscii = 103.
-      WHEN 'h'. rv_zscii = 104.
-      WHEN 'i'. rv_zscii = 105.
-      WHEN 'j'. rv_zscii = 106.
-      WHEN 'k'. rv_zscii = 107.
-      WHEN 'l'. rv_zscii = 108.
-      WHEN 'm'. rv_zscii = 109.
-      WHEN 'n'. rv_zscii = 110.
-      WHEN 'o'. rv_zscii = 111.
-      WHEN 'p'. rv_zscii = 112.
-      WHEN 'q'. rv_zscii = 113.
-      WHEN 'r'. rv_zscii = 114.
-      WHEN 's'. rv_zscii = 115.
-      WHEN 't'. rv_zscii = 116.
-      WHEN 'u'. rv_zscii = 117.
-      WHEN 'v'. rv_zscii = 118.
-      WHEN 'w'. rv_zscii = 119.
-      WHEN 'x'. rv_zscii = 120.
-      WHEN 'y'. rv_zscii = 121.
-      WHEN 'z'. rv_zscii = 122.
-      WHEN OTHERS. rv_zscii = 0.
-    ENDCASE.
+    " Convert character to ZSCII code using cl_abap_conv_out_ce
+    " uccp returns the Unicode code point as a numeric string
+    rv_zscii = cl_abap_conv_out_ce=>uccp( lv_char ).
   ENDMETHOD.
 
 

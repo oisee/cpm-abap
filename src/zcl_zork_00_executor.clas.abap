@@ -70,6 +70,12 @@ CLASS zcl_zork_00_executor DEFINITION
                   iv_index      TYPE i
         RETURNING VALUE(rv_val) TYPE i,
 
+      " Get raw operand value (don't resolve variables - for INC/DEC/LOAD/STORE)
+      get_raw_operand
+        IMPORTING is_instr      TYPE zif_zork_00_types=>ts_instruction
+                  iv_index      TYPE i
+        RETURNING VALUE(rv_val) TYPE i,
+
       " Store result in variable
       store_result
         IMPORTING is_instr TYPE zif_zork_00_types=>ts_instruction
@@ -119,7 +125,25 @@ CLASS zcl_zork_00_executor DEFINITION
 
       byte_to_hex
         IMPORTING iv_byte        TYPE i
-        RETURNING VALUE(rv_hex)  TYPE string.
+        RETURNING VALUE(rv_hex)  TYPE string,
+
+      " Tokenization helpers for read instruction
+      tokenize_input
+        IMPORTING iv_text_buf  TYPE i
+                  iv_parse_buf TYPE i
+                  iv_input_len TYPE i,
+
+      encode_word_to_zchars
+        IMPORTING iv_word        TYPE string
+        RETURNING VALUE(rv_encoded) TYPE i,  " Packed 4-byte encoded word
+
+      lookup_dictionary
+        IMPORTING iv_encoded    TYPE i
+        RETURNING VALUE(rv_addr) TYPE i,
+
+      char_to_zchar
+        IMPORTING iv_char       TYPE string
+        RETURNING VALUE(rv_zchar) TYPE i.
 
 ENDCLASS.
 
@@ -243,6 +267,27 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_raw_operand.
+    " Get raw operand value without resolving variables
+    " Used for instructions that take a variable NUMBER as operand (INC, DEC, etc.)
+    DATA(lv_count) = lines( is_instr-operands ).
+
+    IF iv_index < 0 OR iv_index >= lv_count.
+      rv_val = 0.
+      RETURN.
+    ENDIF.
+
+    READ TABLE is_instr-operands INDEX iv_index + 1 INTO DATA(ls_op).
+    IF sy-subrc <> 0.
+      rv_val = 0.
+      RETURN.
+    ENDIF.
+
+    " Return raw value regardless of type
+    rv_val = ls_op-value.
+  ENDMETHOD.
+
+
   METHOD store_result.
     " Store result in variable specified by instruction
     IF is_instr-has_store = abap_true.
@@ -254,7 +299,9 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
   METHOD handle_branch.
     " Handle conditional branch
-    DATA: lv_take_branch TYPE abap_bool.
+    DATA: lv_take_branch TYPE abap_bool,
+          lv_return_pc   TYPE i,
+          lv_result_var  TYPE i.
 
     " Determine if we should branch
     IF is_instr-branch_on = abap_true.
@@ -278,8 +325,6 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
     CASE is_instr-branch_off.
       WHEN 0.
         " Return false from current routine
-        DATA: lv_return_pc TYPE i,
-              lv_result_var TYPE i.
         mo_stack->pop_frame( IMPORTING ev_return_pc = lv_return_pc
                                         ev_result_var = lv_result_var ).
         IF lv_result_var >= 0.
@@ -325,12 +370,15 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
   METHOD execute_0op.
     " 0OP instructions (no operands)
+    DATA: lv_return_pc  TYPE i,
+          lv_result_var TYPE i,
+          lv_text       TYPE string,
+          lv_retval     TYPE i.
+
     rv_next_pc = is_instr-next_pc.
 
     CASE is_instr-opcode.
       WHEN 0.  " rtrue - return true (1)
-        DATA: lv_return_pc TYPE i,
-              lv_result_var TYPE i.
         mo_stack->pop_frame( IMPORTING ev_return_pc = lv_return_pc
                                         ev_result_var = lv_result_var ).
         IF lv_result_var >= 0.
@@ -348,7 +396,7 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
       WHEN 2.  " print - print embedded string
         IF mo_io IS BOUND.
-          DATA(lv_text) = decode_zstring( is_instr-text_addr ).
+          lv_text = decode_zstring( is_instr-text_addr ).
           mo_io->print_text( lv_text ).
         ENDIF.
 
@@ -381,7 +429,7 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         rv_next_pc = mv_pc.
 
       WHEN 8.  " ret_popped - return with popped stack value
-        DATA(lv_retval) = mo_stack->pop_stack( ).
+        lv_retval = mo_stack->pop_stack( ).
         mo_stack->pop_frame( IMPORTING ev_return_pc = lv_return_pc
                                         ev_result_var = lv_result_var ).
         IF lv_result_var >= 0.
@@ -422,7 +470,8 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
     " 1OP instructions (one operand)
     DATA: lv_op1      TYPE i,
           lv_result   TYPE i,
-          lv_cond     TYPE abap_bool.
+          lv_cond     TYPE abap_bool,
+          lv_text     TYPE string.
 
     rv_next_pc = is_instr-next_pc.
     lv_op1 = get_operand_value( is_instr = is_instr iv_index = 0 ).
@@ -465,15 +514,17 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         store_result( is_instr = is_instr iv_val = lv_result ).
 
       WHEN 5.  " inc - increment variable
-        " lv_op1 is the variable number
-        DATA(lv_val) = mo_stack->get_variable( lv_op1 ).
+        " Operand is the variable NUMBER, not the value
+        DATA(lv_var_num) = get_raw_operand( is_instr = is_instr iv_index = 0 ).
+        DATA(lv_val) = mo_stack->get_variable( lv_var_num ).
         lv_val = to_signed( lv_val ) + 1.
-        mo_stack->set_variable( iv_var = lv_op1 iv_val = to_unsigned( lv_val ) ).
+        mo_stack->set_variable( iv_var = lv_var_num iv_val = to_unsigned( lv_val ) ).
 
       WHEN 6.  " dec - decrement variable
-        lv_val = mo_stack->get_variable( lv_op1 ).
+        lv_var_num = get_raw_operand( is_instr = is_instr iv_index = 0 ).
+        lv_val = mo_stack->get_variable( lv_var_num ).
         lv_val = to_signed( lv_val ) - 1.
-        mo_stack->set_variable( iv_var = lv_op1 iv_val = to_unsigned( lv_val ) ).
+        mo_stack->set_variable( iv_var = lv_var_num iv_val = to_unsigned( lv_val ) ).
 
       WHEN 7.  " print_addr - print string at byte address
         IF mo_io IS BOUND.
@@ -548,7 +599,11 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
           lv_result   TYPE i,
           lv_cond     TYPE abap_bool,
           lv_signed1  TYPE i,
-          lv_signed2  TYPE i.
+          lv_signed2  TYPE i,
+          lv_a        TYPE i,
+          lv_b        TYPE i,
+          lv_pow      TYPE i,
+          lv_bit      TYPE i.
 
     rv_next_pc = is_instr-next_pc.
     lv_op1 = get_operand_value( is_instr = is_instr iv_index = 0 ).
@@ -634,7 +689,6 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         " Branch if (op1 AND op2) = op2
         DATA(lv_and) = 0.
         " Simulate bitwise AND using arithmetic
-        DATA: lv_a TYPE i, lv_b TYPE i, lv_bit TYPE i, lv_pow TYPE i.
         lv_a = lv_op1.
         lv_b = lv_op2.
         lv_pow = 1.
@@ -865,9 +919,66 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         ENDIF.
 
       WHEN 4.  " read / sread - read input line
-        " For now, set status to waiting
-        mv_status = c_status_waiting.
-        " TODO: Implement input handling
+        " v3: read text-buffer parse-buffer
+        " Read a line of input and store in text buffer
+        IF mo_io IS BOUND.
+          DATA(lv_text_buf) = lv_op1.  " Text buffer address
+          DATA(lv_parse_buf) = lv_op2. " Parse buffer address
+          DATA(lv_max_chars) = mo_memory->read_byte( lv_text_buf ).  " Max chars allowed
+
+          " Read input from I/O handler
+          DATA(lv_input) = mo_io->read_line( lv_max_chars ).
+
+          " Store input length at text_buf+1
+          DATA(lv_input_len) = strlen( lv_input ).
+          IF lv_input_len > lv_max_chars.
+            lv_input_len = lv_max_chars.
+          ENDIF.
+          mo_memory->write_byte( iv_addr = lv_text_buf + 1 iv_val = lv_input_len ).
+
+          " Store input characters starting at text_buf+2 (lowercase)
+          DATA: lv_idx  TYPE i,
+                lv_ch   TYPE string,
+                lv_code TYPE i.
+          lv_idx = 0.
+          WHILE lv_idx < lv_input_len.
+            lv_ch = lv_input+lv_idx(1).
+            " Convert to lowercase
+            TRANSLATE lv_ch TO LOWER CASE.
+            " Get ASCII code
+            lv_code = 0.
+            " Simple ASCII lookup
+            CASE lv_ch.
+              WHEN ` `. lv_code = 32.
+              WHEN `a`. lv_code = 97.  WHEN `b`. lv_code = 98.  WHEN `c`. lv_code = 99.
+              WHEN `d`. lv_code = 100. WHEN `e`. lv_code = 101. WHEN `f`. lv_code = 102.
+              WHEN `g`. lv_code = 103. WHEN `h`. lv_code = 104. WHEN `i`. lv_code = 105.
+              WHEN `j`. lv_code = 106. WHEN `k`. lv_code = 107. WHEN `l`. lv_code = 108.
+              WHEN `m`. lv_code = 109. WHEN `n`. lv_code = 110. WHEN `o`. lv_code = 111.
+              WHEN `p`. lv_code = 112. WHEN `q`. lv_code = 113. WHEN `r`. lv_code = 114.
+              WHEN `s`. lv_code = 115. WHEN `t`. lv_code = 116. WHEN `u`. lv_code = 117.
+              WHEN `v`. lv_code = 118. WHEN `w`. lv_code = 119. WHEN `x`. lv_code = 120.
+              WHEN `y`. lv_code = 121. WHEN `z`. lv_code = 122.
+              WHEN `0`. lv_code = 48.  WHEN `1`. lv_code = 49.  WHEN `2`. lv_code = 50.
+              WHEN `3`. lv_code = 51.  WHEN `4`. lv_code = 52.  WHEN `5`. lv_code = 53.
+              WHEN `6`. lv_code = 54.  WHEN `7`. lv_code = 55.  WHEN `8`. lv_code = 56.
+              WHEN `9`. lv_code = 57.
+              WHEN OTHERS. lv_code = 32.  " Default to space
+            ENDCASE.
+            mo_memory->write_byte( iv_addr = lv_text_buf + 2 + lv_idx iv_val = lv_code ).
+            lv_idx = lv_idx + 1.
+          ENDWHILE.
+
+          " Tokenize input into words and fill parse buffer
+          IF lv_parse_buf > 0.
+            tokenize_input( iv_text_buf = lv_text_buf
+                           iv_parse_buf = lv_parse_buf
+                           iv_input_len = lv_input_len ).
+          ENDIF.
+        ELSE.
+          " No I/O handler - set waiting status
+          mv_status = c_status_waiting.
+        ENDIF.
 
       WHEN 5.  " print_char - print character
         IF mo_io IS BOUND.
@@ -1034,15 +1145,23 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
   METHOD decode_zstring.
     " Decode Z-encoded string at given address
-    " Returns decoded text
-    DATA: lv_addr    TYPE i,
-          lv_word    TYPE i,
-          lv_zchar   TYPE i,
-          lv_shift   TYPE i,
-          lv_char    TYPE string,
-          lt_zchars  TYPE TABLE OF i,
-          lv_i       TYPE i,
-          lv_alphabet TYPE i.
+    " Returns decoded text with abbreviation expansion
+    DATA: lv_addr      TYPE i,
+          lv_word      TYPE i,
+          lv_zchar     TYPE i,
+          lv_char      TYPE string,
+          lt_zchars    TYPE TABLE OF i,
+          lv_i         TYPE i,
+          lv_count     TYPE i,
+          lv_alphabet  TYPE i,
+          lv_abbr_num  TYPE i,
+          lv_abbr_addr TYPE i,
+          lv_abbr_ptr  TYPE i,
+          lv_abbr_text TYPE string,
+          lv_next_zc   TYPE i,
+          lv_zscii_hi  TYPE i,
+          lv_zscii_lo  TYPE i,
+          lv_zscii     TYPE i.
 
     " Z-machine alphabet tables (v3)
     " A0: a-z (6-31 = a-z)
@@ -1051,17 +1170,15 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
     rv_text = ''.
     lv_addr = iv_addr.
-    lv_alphabet = 0.  " Start in alphabet 0 (lowercase)
 
-    " Read Z-characters until end marker (high bit set)
+    " Step 1: Collect ALL Z-characters first (until end marker)
+    CLEAR lt_zchars.
     DO.
       lv_word = mo_memory->read_word( lv_addr ).
       lv_addr = lv_addr + 2.
 
       " Extract 3 Z-characters from word (5 bits each)
       " Bits: 15 (end), 14-10 (z1), 9-5 (z2), 4-0 (z3)
-      CLEAR lt_zchars.
-
       lv_zchar = ( lv_word DIV 1024 ) MOD 32.  " Bits 14-10
       APPEND lv_zchar TO lt_zchars.
 
@@ -1070,139 +1187,6 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
 
       lv_zchar = lv_word MOD 32.               " Bits 4-0
       APPEND lv_zchar TO lt_zchars.
-
-      " Process Z-characters
-      LOOP AT lt_zchars INTO lv_zchar.
-        CASE lv_zchar.
-          WHEN 0.
-            " Space
-            rv_text = rv_text && ` `.
-
-          WHEN 1 OR 2 OR 3.
-            " Abbreviation (v2+)
-            " TODO: Implement abbreviations
-            rv_text = rv_text && `[ABBR]`.
-
-          WHEN 4.
-            " Shift to alphabet 1 for next char
-            lv_alphabet = 1.
-            CONTINUE.
-
-          WHEN 5.
-            " Shift to alphabet 2 for next char
-            lv_alphabet = 2.
-            CONTINUE.
-
-          WHEN OTHERS.
-            " Character 6-31
-            IF lv_alphabet = 2 AND lv_zchar = 6.
-              " ZSCII escape sequence (next two z-chars form 10-bit code)
-              " TODO: Implement ZSCII escape
-              rv_text = rv_text && `?`.
-            ELSE.
-              " Map to character based on alphabet
-              CASE lv_alphabet.
-                WHEN 0.  " Lowercase a-z
-                  CASE lv_zchar.
-                    WHEN 6.  lv_char = `a`.
-                    WHEN 7.  lv_char = `b`.
-                    WHEN 8.  lv_char = `c`.
-                    WHEN 9.  lv_char = `d`.
-                    WHEN 10. lv_char = `e`.
-                    WHEN 11. lv_char = `f`.
-                    WHEN 12. lv_char = `g`.
-                    WHEN 13. lv_char = `h`.
-                    WHEN 14. lv_char = `i`.
-                    WHEN 15. lv_char = `j`.
-                    WHEN 16. lv_char = `k`.
-                    WHEN 17. lv_char = `l`.
-                    WHEN 18. lv_char = `m`.
-                    WHEN 19. lv_char = `n`.
-                    WHEN 20. lv_char = `o`.
-                    WHEN 21. lv_char = `p`.
-                    WHEN 22. lv_char = `q`.
-                    WHEN 23. lv_char = `r`.
-                    WHEN 24. lv_char = `s`.
-                    WHEN 25. lv_char = `t`.
-                    WHEN 26. lv_char = `u`.
-                    WHEN 27. lv_char = `v`.
-                    WHEN 28. lv_char = `w`.
-                    WHEN 29. lv_char = `x`.
-                    WHEN 30. lv_char = `y`.
-                    WHEN 31. lv_char = `z`.
-                    WHEN OTHERS. lv_char = `?`.
-                  ENDCASE.
-
-                WHEN 1.  " Uppercase A-Z
-                  CASE lv_zchar.
-                    WHEN 6.  lv_char = `A`.
-                    WHEN 7.  lv_char = `B`.
-                    WHEN 8.  lv_char = `C`.
-                    WHEN 9.  lv_char = `D`.
-                    WHEN 10. lv_char = `E`.
-                    WHEN 11. lv_char = `F`.
-                    WHEN 12. lv_char = `G`.
-                    WHEN 13. lv_char = `H`.
-                    WHEN 14. lv_char = `I`.
-                    WHEN 15. lv_char = `J`.
-                    WHEN 16. lv_char = `K`.
-                    WHEN 17. lv_char = `L`.
-                    WHEN 18. lv_char = `M`.
-                    WHEN 19. lv_char = `N`.
-                    WHEN 20. lv_char = `O`.
-                    WHEN 21. lv_char = `P`.
-                    WHEN 22. lv_char = `Q`.
-                    WHEN 23. lv_char = `R`.
-                    WHEN 24. lv_char = `S`.
-                    WHEN 25. lv_char = `T`.
-                    WHEN 26. lv_char = `U`.
-                    WHEN 27. lv_char = `V`.
-                    WHEN 28. lv_char = `W`.
-                    WHEN 29. lv_char = `X`.
-                    WHEN 30. lv_char = `Y`.
-                    WHEN 31. lv_char = `Z`.
-                    WHEN OTHERS. lv_char = `?`.
-                  ENDCASE.
-
-                WHEN 2.  " Punctuation/symbols
-                  CASE lv_zchar.
-                    WHEN 6.  lv_char = `^`.  " Actually escape, handled above
-                    WHEN 7.  lv_char = |{ cl_abap_char_utilities=>newline }|.
-                    WHEN 8.  lv_char = `0`.
-                    WHEN 9.  lv_char = `1`.
-                    WHEN 10. lv_char = `2`.
-                    WHEN 11. lv_char = `3`.
-                    WHEN 12. lv_char = `4`.
-                    WHEN 13. lv_char = `5`.
-                    WHEN 14. lv_char = `6`.
-                    WHEN 15. lv_char = `7`.
-                    WHEN 16. lv_char = `8`.
-                    WHEN 17. lv_char = `9`.
-                    WHEN 18. lv_char = `.`.
-                    WHEN 19. lv_char = `,`.
-                    WHEN 20. lv_char = `!`.
-                    WHEN 21. lv_char = `?`.
-                    WHEN 22. lv_char = `_`.
-                    WHEN 23. lv_char = `#`.
-                    WHEN 24. lv_char = `'`.
-                    WHEN 25. lv_char = `"`.
-                    WHEN 26. lv_char = `/`.
-                    WHEN 27. lv_char = `\`.
-                    WHEN 28. lv_char = `-`.
-                    WHEN 29. lv_char = `:`.
-                    WHEN 30. lv_char = `(`.
-                    WHEN 31. lv_char = `)`.
-                    WHEN OTHERS. lv_char = `?`.
-                  ENDCASE.
-              ENDCASE.
-
-              rv_text = rv_text && lv_char.
-            ENDIF.
-
-            " Reset to alphabet 0 after each character
-            lv_alphabet = 0.
-        ENDCASE.
-      ENDLOOP.
 
       " Check end marker (bit 15)
       IF lv_word >= 32768.
@@ -1214,6 +1198,197 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
         EXIT.
       ENDIF.
     ENDDO.
+
+    " Step 2: Process Z-characters with index (allows skipping ahead)
+    lv_count = lines( lt_zchars ).
+    lv_i = 1.
+    lv_alphabet = 0.  " Start in alphabet 0 (lowercase)
+
+    WHILE lv_i <= lv_count.
+      READ TABLE lt_zchars INDEX lv_i INTO lv_zchar.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+
+      CASE lv_zchar.
+        WHEN 0.
+          " Space
+          rv_text = rv_text && ` `.
+
+        WHEN 1 OR 2 OR 3.
+          " Abbreviation (v2+)
+          " Next z-char gives index within abbreviation set
+          lv_i = lv_i + 1.
+          IF lv_i <= lv_count.
+            READ TABLE lt_zchars INDEX lv_i INTO lv_next_zc.
+            IF sy-subrc = 0.
+              " Abbreviation number = (z-1) * 32 + next_zchar
+              lv_abbr_num = ( lv_zchar - 1 ) * 32 + lv_next_zc.
+
+              " Get abbreviation table address from header
+              lv_abbr_addr = mo_memory->get_abbrev_addr( ).
+
+              " Each entry is a word address (2 bytes)
+              " Read the word address for this abbreviation
+              lv_abbr_ptr = mo_memory->read_word( lv_abbr_addr + lv_abbr_num * 2 ).
+
+              " Convert word address to byte address (multiply by 2 for v3)
+              lv_abbr_ptr = lv_abbr_ptr * 2.
+
+              " Recursively decode the abbreviation Z-string
+              IF lv_abbr_ptr > 0.
+                lv_abbr_text = decode_zstring( lv_abbr_ptr ).
+                rv_text = rv_text && lv_abbr_text.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+        WHEN 4.
+          " Shift to alphabet 1 for next char
+          lv_alphabet = 1.
+          lv_i = lv_i + 1.
+          CONTINUE.
+
+        WHEN 5.
+          " Shift to alphabet 2 for next char
+          lv_alphabet = 2.
+          lv_i = lv_i + 1.
+          CONTINUE.
+
+        WHEN OTHERS.
+          " Character 6-31
+          IF lv_alphabet = 2 AND lv_zchar = 6.
+            " ZSCII escape sequence (next two z-chars form 10-bit code)
+            " Read next two z-chars
+            lv_i = lv_i + 1.
+            IF lv_i <= lv_count.
+              READ TABLE lt_zchars INDEX lv_i INTO lv_zscii_hi.
+            ELSE.
+              lv_zscii_hi = 0.
+            ENDIF.
+            lv_i = lv_i + 1.
+            IF lv_i <= lv_count.
+              READ TABLE lt_zchars INDEX lv_i INTO lv_zscii_lo.
+            ELSE.
+              lv_zscii_lo = 0.
+            ENDIF.
+            " Combine: high 5 bits + low 5 bits = 10-bit ZSCII code
+            lv_zscii = lv_zscii_hi * 32 + lv_zscii_lo.
+            " Convert ZSCII to character
+            IF lv_zscii >= 32 AND lv_zscii <= 126.
+              DATA(lv_zscii_char) = cl_abap_conv_in_ce=>uccpi( lv_zscii ).
+              rv_text = rv_text && lv_zscii_char.
+            ELSEIF lv_zscii = 13.
+              rv_text = rv_text && cl_abap_char_utilities=>newline.
+            ELSE.
+              rv_text = rv_text && `?`.
+            ENDIF.
+          ELSE.
+            " Map to character based on alphabet
+            CASE lv_alphabet.
+              WHEN 0.  " Lowercase a-z
+                CASE lv_zchar.
+                  WHEN 6.  lv_char = `a`.
+                  WHEN 7.  lv_char = `b`.
+                  WHEN 8.  lv_char = `c`.
+                  WHEN 9.  lv_char = `d`.
+                  WHEN 10. lv_char = `e`.
+                  WHEN 11. lv_char = `f`.
+                  WHEN 12. lv_char = `g`.
+                  WHEN 13. lv_char = `h`.
+                  WHEN 14. lv_char = `i`.
+                  WHEN 15. lv_char = `j`.
+                  WHEN 16. lv_char = `k`.
+                  WHEN 17. lv_char = `l`.
+                  WHEN 18. lv_char = `m`.
+                  WHEN 19. lv_char = `n`.
+                  WHEN 20. lv_char = `o`.
+                  WHEN 21. lv_char = `p`.
+                  WHEN 22. lv_char = `q`.
+                  WHEN 23. lv_char = `r`.
+                  WHEN 24. lv_char = `s`.
+                  WHEN 25. lv_char = `t`.
+                  WHEN 26. lv_char = `u`.
+                  WHEN 27. lv_char = `v`.
+                  WHEN 28. lv_char = `w`.
+                  WHEN 29. lv_char = `x`.
+                  WHEN 30. lv_char = `y`.
+                  WHEN 31. lv_char = `z`.
+                  WHEN OTHERS. lv_char = `?`.
+                ENDCASE.
+
+              WHEN 1.  " Uppercase A-Z
+                CASE lv_zchar.
+                  WHEN 6.  lv_char = `A`.
+                  WHEN 7.  lv_char = `B`.
+                  WHEN 8.  lv_char = `C`.
+                  WHEN 9.  lv_char = `D`.
+                  WHEN 10. lv_char = `E`.
+                  WHEN 11. lv_char = `F`.
+                  WHEN 12. lv_char = `G`.
+                  WHEN 13. lv_char = `H`.
+                  WHEN 14. lv_char = `I`.
+                  WHEN 15. lv_char = `J`.
+                  WHEN 16. lv_char = `K`.
+                  WHEN 17. lv_char = `L`.
+                  WHEN 18. lv_char = `M`.
+                  WHEN 19. lv_char = `N`.
+                  WHEN 20. lv_char = `O`.
+                  WHEN 21. lv_char = `P`.
+                  WHEN 22. lv_char = `Q`.
+                  WHEN 23. lv_char = `R`.
+                  WHEN 24. lv_char = `S`.
+                  WHEN 25. lv_char = `T`.
+                  WHEN 26. lv_char = `U`.
+                  WHEN 27. lv_char = `V`.
+                  WHEN 28. lv_char = `W`.
+                  WHEN 29. lv_char = `X`.
+                  WHEN 30. lv_char = `Y`.
+                  WHEN 31. lv_char = `Z`.
+                  WHEN OTHERS. lv_char = `?`.
+                ENDCASE.
+
+              WHEN 2.  " Punctuation/symbols
+                CASE lv_zchar.
+                  WHEN 6.  lv_char = `^`.  " Actually escape, handled above
+                  WHEN 7.  lv_char = |{ cl_abap_char_utilities=>newline }|.
+                  WHEN 8.  lv_char = `0`.
+                  WHEN 9.  lv_char = `1`.
+                  WHEN 10. lv_char = `2`.
+                  WHEN 11. lv_char = `3`.
+                  WHEN 12. lv_char = `4`.
+                  WHEN 13. lv_char = `5`.
+                  WHEN 14. lv_char = `6`.
+                  WHEN 15. lv_char = `7`.
+                  WHEN 16. lv_char = `8`.
+                  WHEN 17. lv_char = `9`.
+                  WHEN 18. lv_char = `.`.
+                  WHEN 19. lv_char = `,`.
+                  WHEN 20. lv_char = `!`.
+                  WHEN 21. lv_char = `?`.
+                  WHEN 22. lv_char = `_`.
+                  WHEN 23. lv_char = `#`.
+                  WHEN 24. lv_char = `'`.
+                  WHEN 25. lv_char = `"`.
+                  WHEN 26. lv_char = `/`.
+                  WHEN 27. lv_char = `\`.
+                  WHEN 28. lv_char = `-`.
+                  WHEN 29. lv_char = `:`.
+                  WHEN 30. lv_char = `(`.
+                  WHEN 31. lv_char = `)`.
+                  WHEN OTHERS. lv_char = `?`.
+                ENDCASE.
+            ENDCASE.
+
+            rv_text = rv_text && lv_char.
+          ENDIF.
+
+          " Reset to alphabet 0 after each character
+          lv_alphabet = 0.
+      ENDCASE.
+
+      lv_i = lv_i + 1.
+    ENDWHILE.
   ENDMETHOD.
 
 
@@ -1290,6 +1465,481 @@ CLASS zcl_zork_00_executor IMPLEMENTATION.
     ENDCASE.
 
     rv_hex = lv_c1 && lv_c2.
+  ENDMETHOD.
+
+
+  METHOD tokenize_input.
+    " Tokenize input from text buffer into parse buffer
+    " Parse buffer format:
+    "   Byte 0: max words (set by game, we read it)
+    "   Byte 1: number of words found (we write it)
+    "   For each word (4 bytes):
+    "     Bytes 0-1: dictionary address (0 if not found)
+    "     Byte 2: word length
+    "     Byte 3: position in text buffer (1-indexed from text_buf+1)
+    DATA: lv_max_words   TYPE i,
+          lv_num_words   TYPE i,
+          lv_dict_addr   TYPE i,
+          lv_num_seps    TYPE i,
+          lv_separators  TYPE string,
+          lv_idx         TYPE i,
+          lv_word_start  TYPE i,
+          lv_word_len    TYPE i,
+          lv_in_word     TYPE abap_bool,
+          lv_char_code   TYPE i,
+          lv_is_sep      TYPE abap_bool,
+          lv_word        TYPE string,
+          lv_encoded     TYPE i,
+          lv_dict_entry  TYPE i,
+          lv_parse_addr  TYPE i,
+          lv_sep_i       TYPE i,
+          lv_sep_char    TYPE i,
+          lv_w           TYPE i,
+          lv_wc          TYPE i.
+
+    " Read parse buffer max words
+    lv_max_words = mo_memory->read_byte( iv_parse_buf ).
+    IF lv_max_words = 0.
+      RETURN.  " No space for words
+    ENDIF.
+
+    " Get dictionary address and read separators
+    lv_dict_addr = mo_memory->get_dictionary_addr( ).
+    lv_num_seps = mo_memory->read_byte( lv_dict_addr ).
+
+    " Build separator string (ZSCII codes)
+    lv_separators = ''.
+    lv_sep_i = 0.
+    WHILE lv_sep_i < lv_num_seps.
+      lv_sep_char = mo_memory->read_byte( lv_dict_addr + 1 + lv_sep_i ).
+      lv_separators = lv_separators && word_to_hex( lv_sep_char ).  " Store as hex codes
+      lv_sep_i = lv_sep_i + 1.
+    ENDWHILE.
+
+    " Scan text buffer and tokenize
+    lv_num_words = 0.
+    lv_idx = 0.
+    lv_in_word = abap_false.
+    lv_word_start = 0.
+    lv_parse_addr = iv_parse_buf + 2.  " First word entry
+
+    WHILE lv_idx < iv_input_len AND lv_num_words < lv_max_words.
+      " Read character from text buffer (stored at text_buf + 2 + idx)
+      lv_char_code = mo_memory->read_byte( iv_text_buf + 2 + lv_idx ).
+
+      " Check if character is a separator
+      lv_is_sep = abap_false.
+      IF lv_char_code = 32.  " Space is always a separator
+        lv_is_sep = abap_true.
+      ELSE.
+        " Check dictionary separators
+        lv_sep_i = 0.
+        WHILE lv_sep_i < lv_num_seps.
+          lv_sep_char = mo_memory->read_byte( lv_dict_addr + 1 + lv_sep_i ).
+          IF lv_char_code = lv_sep_char.
+            lv_is_sep = abap_true.
+            EXIT.
+          ENDIF.
+          lv_sep_i = lv_sep_i + 1.
+        ENDWHILE.
+      ENDIF.
+
+      IF lv_is_sep = abap_true.
+        " End current word if any
+        IF lv_in_word = abap_true.
+          lv_word_len = lv_idx - lv_word_start.
+          " Extract word from text buffer
+          lv_word = ''.
+          lv_w = 0.
+          WHILE lv_w < lv_word_len AND lv_w < 6.  " Max 6 chars for v3 dictionary
+            lv_wc = mo_memory->read_byte( iv_text_buf + 2 + lv_word_start + lv_w ).
+            " Convert ZSCII to character
+            IF lv_wc >= 97 AND lv_wc <= 122.  " a-z
+              CASE lv_wc.
+                WHEN 97.  lv_word = lv_word && `a`.
+                WHEN 98.  lv_word = lv_word && `b`.
+                WHEN 99.  lv_word = lv_word && `c`.
+                WHEN 100. lv_word = lv_word && `d`.
+                WHEN 101. lv_word = lv_word && `e`.
+                WHEN 102. lv_word = lv_word && `f`.
+                WHEN 103. lv_word = lv_word && `g`.
+                WHEN 104. lv_word = lv_word && `h`.
+                WHEN 105. lv_word = lv_word && `i`.
+                WHEN 106. lv_word = lv_word && `j`.
+                WHEN 107. lv_word = lv_word && `k`.
+                WHEN 108. lv_word = lv_word && `l`.
+                WHEN 109. lv_word = lv_word && `m`.
+                WHEN 110. lv_word = lv_word && `n`.
+                WHEN 111. lv_word = lv_word && `o`.
+                WHEN 112. lv_word = lv_word && `p`.
+                WHEN 113. lv_word = lv_word && `q`.
+                WHEN 114. lv_word = lv_word && `r`.
+                WHEN 115. lv_word = lv_word && `s`.
+                WHEN 116. lv_word = lv_word && `t`.
+                WHEN 117. lv_word = lv_word && `u`.
+                WHEN 118. lv_word = lv_word && `v`.
+                WHEN 119. lv_word = lv_word && `w`.
+                WHEN 120. lv_word = lv_word && `x`.
+                WHEN 121. lv_word = lv_word && `y`.
+                WHEN 122. lv_word = lv_word && `z`.
+              ENDCASE.
+            ENDIF.
+            lv_w = lv_w + 1.
+          ENDWHILE.
+
+          " Encode and lookup
+          lv_encoded = encode_word_to_zchars( lv_word ).
+          lv_dict_entry = lookup_dictionary( lv_encoded ).
+
+          " Store in parse buffer: dict_addr(2), length(1), position(1)
+          " Position counts from text_buf+1 for v1-4, so first char (at text_buf+2) is position 1
+          mo_memory->write_word( iv_addr = lv_parse_addr iv_val = lv_dict_entry ).
+          mo_memory->write_byte( iv_addr = lv_parse_addr + 2 iv_val = lv_word_len ).
+          mo_memory->write_byte( iv_addr = lv_parse_addr + 3 iv_val = lv_word_start + 1 ).
+
+          lv_parse_addr = lv_parse_addr + 4.
+          lv_num_words = lv_num_words + 1.
+          lv_in_word = abap_false.
+        ENDIF.
+
+        " If separator is not space, it's a word separator that's also a token
+        IF lv_char_code <> 32 AND lv_num_words < lv_max_words.
+          " Separator itself is a token
+          lv_word = ''.
+          " Convert separator to character
+          IF lv_char_code >= 32 AND lv_char_code <= 126.
+            CASE lv_char_code.
+              WHEN 44.  lv_word = `,`.
+              WHEN 46.  lv_word = `.`.
+              WHEN 34.  lv_word = `"`.
+              WHEN OTHERS. lv_word = `?`.
+            ENDCASE.
+          ENDIF.
+
+          lv_encoded = encode_word_to_zchars( lv_word ).
+          lv_dict_entry = lookup_dictionary( lv_encoded ).
+
+          mo_memory->write_word( iv_addr = lv_parse_addr iv_val = lv_dict_entry ).
+          mo_memory->write_byte( iv_addr = lv_parse_addr + 2 iv_val = 1 ).
+          mo_memory->write_byte( iv_addr = lv_parse_addr + 3 iv_val = lv_idx + 1 ).
+
+          lv_parse_addr = lv_parse_addr + 4.
+          lv_num_words = lv_num_words + 1.
+        ENDIF.
+      ELSE.
+        " Regular character - start or continue word
+        IF lv_in_word = abap_false.
+          lv_word_start = lv_idx.
+          lv_in_word = abap_true.
+        ENDIF.
+      ENDIF.
+
+      lv_idx = lv_idx + 1.
+    ENDWHILE.
+
+    " Handle final word if input ended mid-word
+    IF lv_in_word = abap_true AND lv_num_words < lv_max_words.
+      lv_word_len = lv_idx - lv_word_start.
+      lv_word = ''.
+      lv_w = 0.
+      WHILE lv_w < lv_word_len AND lv_w < 6.
+        lv_wc = mo_memory->read_byte( iv_text_buf + 2 + lv_word_start + lv_w ).
+        IF lv_wc >= 97 AND lv_wc <= 122.
+          CASE lv_wc.
+            WHEN 97.  lv_word = lv_word && `a`.
+            WHEN 98.  lv_word = lv_word && `b`.
+            WHEN 99.  lv_word = lv_word && `c`.
+            WHEN 100. lv_word = lv_word && `d`.
+            WHEN 101. lv_word = lv_word && `e`.
+            WHEN 102. lv_word = lv_word && `f`.
+            WHEN 103. lv_word = lv_word && `g`.
+            WHEN 104. lv_word = lv_word && `h`.
+            WHEN 105. lv_word = lv_word && `i`.
+            WHEN 106. lv_word = lv_word && `j`.
+            WHEN 107. lv_word = lv_word && `k`.
+            WHEN 108. lv_word = lv_word && `l`.
+            WHEN 109. lv_word = lv_word && `m`.
+            WHEN 110. lv_word = lv_word && `n`.
+            WHEN 111. lv_word = lv_word && `o`.
+            WHEN 112. lv_word = lv_word && `p`.
+            WHEN 113. lv_word = lv_word && `q`.
+            WHEN 114. lv_word = lv_word && `r`.
+            WHEN 115. lv_word = lv_word && `s`.
+            WHEN 116. lv_word = lv_word && `t`.
+            WHEN 117. lv_word = lv_word && `u`.
+            WHEN 118. lv_word = lv_word && `v`.
+            WHEN 119. lv_word = lv_word && `w`.
+            WHEN 120. lv_word = lv_word && `x`.
+            WHEN 121. lv_word = lv_word && `y`.
+            WHEN 122. lv_word = lv_word && `z`.
+          ENDCASE.
+        ENDIF.
+        lv_w = lv_w + 1.
+      ENDWHILE.
+
+      lv_encoded = encode_word_to_zchars( lv_word ).
+      lv_dict_entry = lookup_dictionary( lv_encoded ).
+
+      mo_memory->write_word( iv_addr = lv_parse_addr iv_val = lv_dict_entry ).
+      mo_memory->write_byte( iv_addr = lv_parse_addr + 2 iv_val = lv_word_len ).
+      mo_memory->write_byte( iv_addr = lv_parse_addr + 3 iv_val = lv_word_start + 1 ).
+
+      lv_num_words = lv_num_words + 1.
+    ENDIF.
+
+    " Write number of words found
+    mo_memory->write_byte( iv_addr = iv_parse_buf + 1 iv_val = lv_num_words ).
+  ENDMETHOD.
+
+
+  METHOD char_to_zchar.
+    " Convert ASCII character to Z-character (alphabet 0)
+    " Returns 5-bit Z-char value (6-31 for a-z)
+    rv_zchar = 5.  " Default to shift-2 (invalid)
+
+    CASE iv_char.
+      WHEN `a`. rv_zchar = 6.
+      WHEN `b`. rv_zchar = 7.
+      WHEN `c`. rv_zchar = 8.
+      WHEN `d`. rv_zchar = 9.
+      WHEN `e`. rv_zchar = 10.
+      WHEN `f`. rv_zchar = 11.
+      WHEN `g`. rv_zchar = 12.
+      WHEN `h`. rv_zchar = 13.
+      WHEN `i`. rv_zchar = 14.
+      WHEN `j`. rv_zchar = 15.
+      WHEN `k`. rv_zchar = 16.
+      WHEN `l`. rv_zchar = 17.
+      WHEN `m`. rv_zchar = 18.
+      WHEN `n`. rv_zchar = 19.
+      WHEN `o`. rv_zchar = 20.
+      WHEN `p`. rv_zchar = 21.
+      WHEN `q`. rv_zchar = 22.
+      WHEN `r`. rv_zchar = 23.
+      WHEN `s`. rv_zchar = 24.
+      WHEN `t`. rv_zchar = 25.
+      WHEN `u`. rv_zchar = 26.
+      WHEN `v`. rv_zchar = 27.
+      WHEN `w`. rv_zchar = 28.
+      WHEN `x`. rv_zchar = 29.
+      WHEN `y`. rv_zchar = 30.
+      WHEN `z`. rv_zchar = 31.
+      WHEN OTHERS.
+        " For punctuation, need shift to alphabet 2
+        " For now, just use padding (5)
+        rv_zchar = 5.
+    ENDCASE.
+  ENDMETHOD.
+
+
+  METHOD encode_word_to_zchars.
+    " Encode word to Z-machine dictionary format (4 bytes for v3)
+    " v3 uses 6 Z-characters packed into 2 words (4 bytes)
+    " Each word: 1 bit end marker + 3 x 5-bit Z-chars
+    DATA: lv_zchars TYPE string,
+          lv_i      TYPE i,
+          lv_len    TYPE i,
+          lv_ch     TYPE string,
+          lv_zc     TYPE i,
+          lv_z1     TYPE i,
+          lv_z2     TYPE i,
+          lv_z3     TYPE i,
+          lv_word1  TYPE i,
+          lv_word2  TYPE i.
+
+    " Get Z-characters for up to 6 characters
+    lv_len = strlen( iv_word ).
+    IF lv_len > 6.
+      lv_len = 6.
+    ENDIF.
+
+    " Convert each character to Z-char
+    lv_zchars = ''.
+    lv_i = 0.
+    WHILE lv_i < 6.
+      IF lv_i < lv_len.
+        lv_ch = iv_word+lv_i(1).
+        lv_zc = char_to_zchar( lv_ch ).
+        lv_zchars = lv_zchars && byte_to_hex( lv_zc ).
+      ELSE.
+        " Pad with 5 (shift character, acts as padding)
+        lv_zchars = lv_zchars && '05'.
+      ENDIF.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+
+    " Pack 6 Z-chars into 2 words
+    " Word 1: 0 + z1(5) + z2(5) + z3(5) = 16 bits
+    " Word 2: 1 + z4(5) + z5(5) + z6(5) = 16 bits (high bit = end marker)
+
+    " Extract Z-char values from hex string
+    DATA: lv_z4   TYPE i,
+          lv_z5   TYPE i,
+          lv_z6   TYPE i,
+          lv_hex1 TYPE string,
+          lv_hex2 TYPE string,
+          lv_hex3 TYPE string,
+          lv_hex4 TYPE string,
+          lv_hex5 TYPE string,
+          lv_hex6 TYPE string.
+
+    " Parse hex pairs (each is 2 chars)
+    lv_hex1 = lv_zchars+0(2).
+    lv_hex2 = lv_zchars+2(2).
+    lv_hex3 = lv_zchars+4(2).
+    lv_hex4 = lv_zchars+6(2).
+    lv_hex5 = lv_zchars+8(2).
+    lv_hex6 = lv_zchars+10(2).
+
+    " Convert hex to integer (simple conversion since values are 0-31)
+    lv_z1 = 0.
+    CASE lv_hex1+1(1).
+      WHEN '0'. lv_z1 = 0.  WHEN '1'. lv_z1 = 1.  WHEN '2'. lv_z1 = 2.  WHEN '3'. lv_z1 = 3.
+      WHEN '4'. lv_z1 = 4.  WHEN '5'. lv_z1 = 5.  WHEN '6'. lv_z1 = 6.  WHEN '7'. lv_z1 = 7.
+      WHEN '8'. lv_z1 = 8.  WHEN '9'. lv_z1 = 9.  WHEN 'A'. lv_z1 = 10. WHEN 'B'. lv_z1 = 11.
+      WHEN 'C'. lv_z1 = 12. WHEN 'D'. lv_z1 = 13. WHEN 'E'. lv_z1 = 14. WHEN 'F'. lv_z1 = 15.
+    ENDCASE.
+    IF lv_hex1(1) = '1'.
+      lv_z1 = lv_z1 + 16.
+    ENDIF.
+
+    lv_z2 = 0.
+    CASE lv_hex2+1(1).
+      WHEN '0'. lv_z2 = 0.  WHEN '1'. lv_z2 = 1.  WHEN '2'. lv_z2 = 2.  WHEN '3'. lv_z2 = 3.
+      WHEN '4'. lv_z2 = 4.  WHEN '5'. lv_z2 = 5.  WHEN '6'. lv_z2 = 6.  WHEN '7'. lv_z2 = 7.
+      WHEN '8'. lv_z2 = 8.  WHEN '9'. lv_z2 = 9.  WHEN 'A'. lv_z2 = 10. WHEN 'B'. lv_z2 = 11.
+      WHEN 'C'. lv_z2 = 12. WHEN 'D'. lv_z2 = 13. WHEN 'E'. lv_z2 = 14. WHEN 'F'. lv_z2 = 15.
+    ENDCASE.
+    IF lv_hex2(1) = '1'.
+      lv_z2 = lv_z2 + 16.
+    ENDIF.
+
+    lv_z3 = 0.
+    CASE lv_hex3+1(1).
+      WHEN '0'. lv_z3 = 0.  WHEN '1'. lv_z3 = 1.  WHEN '2'. lv_z3 = 2.  WHEN '3'. lv_z3 = 3.
+      WHEN '4'. lv_z3 = 4.  WHEN '5'. lv_z3 = 5.  WHEN '6'. lv_z3 = 6.  WHEN '7'. lv_z3 = 7.
+      WHEN '8'. lv_z3 = 8.  WHEN '9'. lv_z3 = 9.  WHEN 'A'. lv_z3 = 10. WHEN 'B'. lv_z3 = 11.
+      WHEN 'C'. lv_z3 = 12. WHEN 'D'. lv_z3 = 13. WHEN 'E'. lv_z3 = 14. WHEN 'F'. lv_z3 = 15.
+    ENDCASE.
+    IF lv_hex3(1) = '1'.
+      lv_z3 = lv_z3 + 16.
+    ENDIF.
+
+    lv_z4 = 0.
+    CASE lv_hex4+1(1).
+      WHEN '0'. lv_z4 = 0.  WHEN '1'. lv_z4 = 1.  WHEN '2'. lv_z4 = 2.  WHEN '3'. lv_z4 = 3.
+      WHEN '4'. lv_z4 = 4.  WHEN '5'. lv_z4 = 5.  WHEN '6'. lv_z4 = 6.  WHEN '7'. lv_z4 = 7.
+      WHEN '8'. lv_z4 = 8.  WHEN '9'. lv_z4 = 9.  WHEN 'A'. lv_z4 = 10. WHEN 'B'. lv_z4 = 11.
+      WHEN 'C'. lv_z4 = 12. WHEN 'D'. lv_z4 = 13. WHEN 'E'. lv_z4 = 14. WHEN 'F'. lv_z4 = 15.
+    ENDCASE.
+    IF lv_hex4(1) = '1'.
+      lv_z4 = lv_z4 + 16.
+    ENDIF.
+
+    lv_z5 = 0.
+    CASE lv_hex5+1(1).
+      WHEN '0'. lv_z5 = 0.  WHEN '1'. lv_z5 = 1.  WHEN '2'. lv_z5 = 2.  WHEN '3'. lv_z5 = 3.
+      WHEN '4'. lv_z5 = 4.  WHEN '5'. lv_z5 = 5.  WHEN '6'. lv_z5 = 6.  WHEN '7'. lv_z5 = 7.
+      WHEN '8'. lv_z5 = 8.  WHEN '9'. lv_z5 = 9.  WHEN 'A'. lv_z5 = 10. WHEN 'B'. lv_z5 = 11.
+      WHEN 'C'. lv_z5 = 12. WHEN 'D'. lv_z5 = 13. WHEN 'E'. lv_z5 = 14. WHEN 'F'. lv_z5 = 15.
+    ENDCASE.
+    IF lv_hex5(1) = '1'.
+      lv_z5 = lv_z5 + 16.
+    ENDIF.
+
+    lv_z6 = 0.
+    CASE lv_hex6+1(1).
+      WHEN '0'. lv_z6 = 0.  WHEN '1'. lv_z6 = 1.  WHEN '2'. lv_z6 = 2.  WHEN '3'. lv_z6 = 3.
+      WHEN '4'. lv_z6 = 4.  WHEN '5'. lv_z6 = 5.  WHEN '6'. lv_z6 = 6.  WHEN '7'. lv_z6 = 7.
+      WHEN '8'. lv_z6 = 8.  WHEN '9'. lv_z6 = 9.  WHEN 'A'. lv_z6 = 10. WHEN 'B'. lv_z6 = 11.
+      WHEN 'C'. lv_z6 = 12. WHEN 'D'. lv_z6 = 13. WHEN 'E'. lv_z6 = 14. WHEN 'F'. lv_z6 = 15.
+    ENDCASE.
+    IF lv_hex6(1) = '1'.
+      lv_z6 = lv_z6 + 16.
+    ENDIF.
+
+    " Pack into words
+    " Word 1: bits 14-10 = z1, bits 9-5 = z2, bits 4-0 = z3
+    lv_word1 = lv_z1 * 1024 + lv_z2 * 32 + lv_z3.
+
+    " Word 2: bit 15 = 1 (end), bits 14-10 = z4, bits 9-5 = z5, bits 4-0 = z6
+    lv_word2 = 32768 + lv_z4 * 1024 + lv_z5 * 32 + lv_z6.
+
+    " Combine into 32-bit value (word1 << 16 | word2)
+    rv_encoded = lv_word1 * 65536 + lv_word2.
+  ENDMETHOD.
+
+
+  METHOD lookup_dictionary.
+    " Binary search dictionary for encoded word
+    " Returns dictionary entry address or 0 if not found
+    DATA: lv_dict_addr   TYPE i,
+          lv_num_seps    TYPE i,
+          lv_entry_len   TYPE i,
+          lv_num_entries TYPE i,
+          lv_entries_addr TYPE i,
+          lv_low         TYPE i,
+          lv_high        TYPE i,
+          lv_mid         TYPE i,
+          lv_entry_addr  TYPE i,
+          lv_entry_word1 TYPE i,
+          lv_entry_word2 TYPE i,
+          lv_entry_val   TYPE i,
+          lv_search_word1 TYPE i,
+          lv_search_word2 TYPE i.
+
+    rv_addr = 0.
+
+    " Get dictionary header
+    lv_dict_addr = mo_memory->get_dictionary_addr( ).
+    lv_num_seps = mo_memory->read_byte( lv_dict_addr ).
+
+    " Entry length and count are after separators
+    lv_entry_len = mo_memory->read_byte( lv_dict_addr + 1 + lv_num_seps ).
+    lv_num_entries = mo_memory->read_word( lv_dict_addr + 2 + lv_num_seps ).
+
+    " Handle negative entry count (means unsorted)
+    IF lv_num_entries >= 32768.
+      lv_num_entries = lv_num_entries - 65536.
+    ENDIF.
+    IF lv_num_entries < 0.
+      lv_num_entries = 0 - lv_num_entries.  " Use absolute value
+      " TODO: Linear search for unsorted dictionaries
+    ENDIF.
+
+    " Entries start after header
+    lv_entries_addr = lv_dict_addr + 4 + lv_num_seps.
+
+    " Extract search words from encoded value
+    lv_search_word1 = iv_encoded DIV 65536.
+    lv_search_word2 = iv_encoded MOD 65536.
+
+    " Binary search
+    lv_low = 0.
+    lv_high = lv_num_entries - 1.
+
+    WHILE lv_low <= lv_high.
+      lv_mid = ( lv_low + lv_high ) DIV 2.
+      lv_entry_addr = lv_entries_addr + lv_mid * lv_entry_len.
+
+      " Read entry's encoded word (4 bytes for v3)
+      lv_entry_word1 = mo_memory->read_word( lv_entry_addr ).
+      lv_entry_word2 = mo_memory->read_word( lv_entry_addr + 2 ).
+      lv_entry_val = lv_entry_word1 * 65536 + lv_entry_word2.
+
+      IF iv_encoded = lv_entry_val.
+        " Found it
+        rv_addr = lv_entry_addr.
+        RETURN.
+      ELSEIF iv_encoded < lv_entry_val.
+        lv_high = lv_mid - 1.
+      ELSE.
+        lv_low = lv_mid + 1.
+      ENDIF.
+    ENDWHILE.
+
+    " Not found
+    rv_addr = 0.
   ENDMETHOD.
 
 ENDCLASS.

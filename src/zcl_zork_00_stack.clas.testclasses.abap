@@ -342,7 +342,7 @@ CLASS ltcl_stack_test IMPLEMENTATION.
   METHOD test_frame_args.
     " Test that arguments are passed to locals
     " Args: 1000, 2000, 3000 (as hex: 03E8, 07D0, 0BB8)
-    DATA(lv_args) = '03E807D00BB8'.
+    DATA(lv_args) = CONV string( '03E807D00BB8' ).
 
     mo_stack->push_frame(
       iv_return_pc = 0
