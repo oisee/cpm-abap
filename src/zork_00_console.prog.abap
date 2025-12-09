@@ -220,8 +220,9 @@ CLASS lcl_console_controller IMPLEMENTATION.
 
 
   METHOD show_welcome.
-    DATA: lt_html TYPE TABLE OF char1024,
-          lv_url  TYPE c LENGTH 250.
+    TYPES ty_char1024 TYPE c LENGTH 1024.
+    DATA lt_html TYPE STANDARD TABLE OF ty_char1024 WITH DEFAULT KEY.
+    DATA lv_url  TYPE c LENGTH 250.
 
     CHECK mo_io IS BOUND.
 
@@ -273,7 +274,8 @@ CLASS lcl_console_controller IMPLEMENTATION.
 
 
   METHOD show_error.
-    DATA: lt_html TYPE TABLE OF char1024,
+    TYPES ty_char1024 TYPE c LENGTH 1024.
+    DATA: lt_html TYPE STANDARD TABLE OF ty_char1024 WITH DEFAULT KEY,
           lv_url  TYPE c LENGTH 250.
 
     CHECK mo_io IS BOUND.
