@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A working proof-of-concept CPU emulator for the Intel 8080 and Zilog Z80 processors, implemented in ABAP (SAP's programming language). This project demonstrates the feasibility of emulating vintage 8-bit CPUs using ABAP's bit manipulation and table processing capabilities.",
   "scripts": {
-    "test": "abap_transpile && node output/index.mjs"
+    "test": "abap_transpile abap_transpile.jsonc && node output/index.mjs"
   },
   "repository": {
     "type": "git",

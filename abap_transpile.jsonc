@@ -1,0 +1,27 @@
+{
+  "input_folder": ["src"],
+  "input_filter": [
+  ],
+  "exclude_filter": [
+    "zork_00_console",
+    "zcl_zork_00_io_html"
+  ],
+  "output_folder": "output",
+  "libs": [
+    {
+      "url": "https://github.com/open-abap/open-abap-core"
+    }
+  ],
+  "write_unit_tests": true,
+  "write_source_map": true,
+  "options": {
+    "ignoreSyntaxCheck": false,
+    "addFilenames": true,
+    "addCommonJS": true,
+    "unknownTypes": "runtimeError",
+    "populateTables": {
+      "reposrc": false
+    },
+    "skip": []
+  }
+}
