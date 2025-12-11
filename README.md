@@ -4,13 +4,19 @@ Two vintage computing emulators implemented in ABAP:
 1. **Z80/i8080 CPU Emulator** - For running CP/M programs
 2. **Z-Machine Interpreter** - For running Infocom interactive fiction (ZORK!)
 
-## Current Status (2025-12-08)
+## Current Status (2025-12-11)
 
-### Z-Machine Interpreter (NEW!)
-✅ **Phase 1-4 Complete** - Memory, Stack, Decoder, I/O
+### Z-Machine Interpreter
+✅ **Working!** - Plays MiniZork in SAP GUI
 ✅ **4 core classes** with 30+ unit tests
 ✅ **Proper ABAP types** - TS_/TT_/TY_ conventions with internal tables
-✅ **Deployed to SAP** - Ready for executor implementation
+✅ **Deployed to SAP** - Executor and all core opcodes implemented
+
+### Z80 CPU Emulator (NEW!)
+✅ **Full prefix opcode support** - CB, DD, ED, FD handlers
+✅ **Composition architecture** - Separate handler classes via interface
+✅ **38 unit tests, all passing**
+✅ **SAP package: $ZCPU_Z80_00**
 
 ### i8080 CPU Emulator
 ✅ **86 / ~105 core i8080 opcodes implemented (82%)**
@@ -47,6 +53,17 @@ cpm-abap/
 ├── src/
 │   ├── zcl_cpu_8080_v2.clas.abap              # i8080 CPU emulator
 │   ├── zcl_cpu_8080_v2.clas.testclasses.abap  # i8080 unit tests
+│   │
+│   ├── zcl_cpu_z80.clas.abap                  # Z80 CPU emulator (main)
+│   ├── zcl_cpu_z80.clas.testclasses.abap      # Z80 unit tests (38 tests)
+│   ├── zif_cpu_z80_bus.intf.abap              # Bus interface (memory + I/O)
+│   ├── zif_cpu_z80_core.intf.abap             # Core CPU interface for handlers
+│   ├── zif_cpu_z80_prefix.intf.abap           # Prefix handler interface
+│   ├── zcl_cpu_z80_bus_simple.clas.abap       # Simple bus implementation
+│   ├── zcl_cpu_z80_prefix_cb.clas.abap        # CB prefix (bit ops, rotates)
+│   ├── zcl_cpu_z80_prefix_dd.clas.abap        # DD prefix (IX instructions)
+│   ├── zcl_cpu_z80_prefix_ed.clas.abap        # ED prefix (extended ops)
+│   ├── zcl_cpu_z80_prefix_fd.clas.abap        # FD prefix (IY instructions)
 │   │
 │   ├── zif_zork_00_types.intf.abap            # Z-machine types (TS_/TT_/TY_)
 │   ├── zif_zork_00_io.intf.abap               # Z-machine I/O interface
@@ -111,6 +128,61 @@ TYPES: tt_instructions TYPE STANDARD TABLE OF ts_instruction WITH KEY address.
                                                                    ▼
                                                             Game output
 ```
+
+## Z80 CPU Emulator Architecture
+
+The Z80 emulator uses a **composition pattern** with separate prefix handlers for cleaner code organization.
+
+### Components (SAP Package: $ZCPU_Z80_00)
+
+| Class/Interface | Purpose |
+|-----------------|---------|
+| `ZCL_CPU_Z80` | Main CPU - registers, main opcodes, orchestration |
+| `ZIF_CPU_Z80_BUS` | Bus interface for memory (64KB) and I/O (256 ports) |
+| `ZIF_CPU_Z80_CORE` | Core CPU interface for prefix handlers |
+| `ZIF_CPU_Z80_PREFIX` | Prefix handler interface (`execute()` method) |
+| `ZCL_CPU_Z80_PREFIX_CB` | CB prefix - bit ops, rotates, shifts |
+| `ZCL_CPU_Z80_PREFIX_DD` | DD prefix - IX index register ops + DDCB |
+| `ZCL_CPU_Z80_PREFIX_FD` | FD prefix - IY index register ops + FDCB |
+| `ZCL_CPU_Z80_PREFIX_ED` | ED prefix - block moves, I/O, extended ops |
+| `ZCL_CPU_Z80_BUS_SIMPLE` | Simple bus implementation for testing |
+
+### Prefix Handler Architecture
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │              ZCL_CPU_Z80                    │
+                    │  ┌─────────────────────────────────────┐   │
+  Opcode fetch      │  │           exec_main()               │   │
+  ───────────────►  │  │  CASE opcode                        │   │
+                    │  │    WHEN 203 → mo_cb_handler         │   │
+                    │  │    WHEN 221 → mo_dd_handler         │   │
+                    │  │    WHEN 237 → mo_ed_handler         │   │
+                    │  │    WHEN 253 → mo_fd_handler         │   │
+                    │  └──────────────┬──────────────────────┘   │
+                    │                 │                          │
+                    │    implements   ▼                          │
+                    │        ZIF_CPU_Z80_CORE                    │
+                    └─────────────────┬───────────────────────────┘
+                                      │
+           ┌──────────────────────────┼──────────────────────────┐
+           │                          │                          │
+           ▼                          ▼                          ▼
+  ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+  │ PREFIX_CB       │      │ PREFIX_DD/FD    │      │ PREFIX_ED       │
+  │ - RLC/RRC/RL/RR │      │ - LD IX/IY,nn   │      │ - LDIR/LDDR     │
+  │ - SLA/SRA/SRL   │      │ - ADD IX/IY,rr  │      │ - CPIR/CPDR     │
+  │ - BIT/SET/RES   │      │ - LD r,(IX+d)   │      │ - IN/OUT block  │
+  └─────────────────┘      │ - DDCB/FDCB     │      │ - NEG/RETN/RETI │
+                           └─────────────────┘      └─────────────────┘
+```
+
+### Key Design Decisions
+
+1. **Composition over inheritance** - Prefix handlers are separate classes, not subclasses
+2. **Interface-based coupling** - Handlers access CPU via `ZIF_CPU_Z80_CORE` interface
+3. **Bus abstraction** - Memory and I/O unified via `ZIF_CPU_Z80_BUS`
+4. **Pre-computed flag tables** - Each handler has its own SZP flag lookup table
 
 ## What's Implemented
 
@@ -412,4 +484,4 @@ Educational/experimental project. RunCPM reference implementation is MIT license
 
 *Retro computing in ABAP - because why not?* 🚀
 
-*Last updated: 2025-12-08*
+*Last updated: 2025-12-11*
