@@ -6,13 +6,20 @@ Two vintage computing emulators implemented in ABAP:
 
 ## Current Status (2025-12-11)
 
+### CP/M 2.2 Emulator - WORKING!
+✅ **Interactive console** - ZCPM_CONSOLE with HTML display in SAP GUI
+✅ **Full I/O support** - BDOS functions 1, 2, 6, 9, 10, 11 (console I/O)
+✅ **File operations** - BDOS 15, 16, 20, 26, 33, 35, 36 (open, close, read, DMA)
+✅ **Runs ZORK!** - Load ZORK1.COM + ZORK1.DAT from SMW0
+✅ **Input waiting** - Pauses for user input, resumes on Enter
+
 ### Z-Machine Interpreter
 ✅ **Working!** - Plays MiniZork in SAP GUI
 ✅ **4 core classes** with 30+ unit tests
 ✅ **Proper ABAP types** - TS_/TT_/TY_ conventions with internal tables
 ✅ **Deployed to SAP** - Executor and all core opcodes implemented
 
-### Z80 CPU Emulator (NEW!)
+### Z80 CPU Emulator
 ✅ **Full prefix opcode support** - CB, DD, ED, FD handlers
 ✅ **Composition architecture** - Separate handler classes via interface
 ✅ **38 unit tests, all passing**
@@ -23,7 +30,16 @@ Two vintage computing emulators implemented in ABAP:
 ✅ **16 unit tests, all passing**
 ✅ **Local TDD workflow operational** (transpile + test < 1 second)
 
-### Quick Start
+### Quick Start - CP/M Emulator (SAP)
+
+```
+1. Upload ZORK1.COM and ZORK1.DAT to SMW0
+2. Run transaction SE38 → ZCPM_CONSOLE
+3. Select "SMW0" source, choose ZORK1.COM
+4. Play ZORK in SAP GUI!
+```
+
+### Quick Start - Local Development
 
 ```bash
 # Run tests locally
@@ -468,17 +484,22 @@ Educational/experimental project. RunCPM reference implementation is MIT license
 
 ## Next Milestones
 
-### Z-Machine Interpreter
-🎯 **Immediate:** Implement `ZCL_ZORK_00_EXECUTOR` - instruction execution engine
-🎯 **Short term:** Implement core opcodes (arithmetic, branches, calls)
-🎯 **Medium term:** Object table, dictionary, parser
-🎯 **Long term:** Run ZORK I in SAP GUI!
+### CP/M Emulator - ACHIEVED!
+✅ **DONE:** Interactive console with input waiting
+✅ **DONE:** File I/O (FCB, DMA, random read)
+✅ **DONE:** Runs ZORK1.COM in SAP GUI!
+🎯 **Next:** More BDOS functions (directory, write)
+🎯 **Future:** Run more CP/M software (Turbo Pascal, WordStar)
+
+### Z-Machine Interpreter - ACHIEVED!
+✅ **DONE:** Core interpreter running MiniZork
+✅ **DONE:** All essential opcodes implemented
+🎯 **Next:** Save/restore game state
+🎯 **Future:** Full ZORK I support
 
 ### i8080 CPU Emulator
 🎯 **Immediate:** Complete i8080 instruction set (~19 opcodes)
 🎯 **Short term:** Run 8080 Exerciser test suite
-🎯 **Medium term:** CP/M BDOS emulation
-🎯 **Long term:** Run CP/M programs (Turbo Pascal, MBASIC)
 
 ---
 
