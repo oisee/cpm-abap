@@ -307,6 +307,15 @@ CLASS zcl_cpu_z80_bus_simple IMPLEMENTATION.
     mv_input = mv_input && iv_text.
   ENDMETHOD.
 
+  METHOD zif_cpu_z80_bus~remove_last_output.
+    " Remove last character from output buffer (backspace handling)
+    DATA lv_len TYPE i.
+    lv_len = strlen( mv_output ).
+    IF lv_len > 0.
+      mv_output = substring( val = mv_output off = 0 len = lv_len - 1 ).
+    ENDIF.
+  ENDMETHOD.
+
   METHOD get_memory.
     " Convert hex string to xstring
     DATA lv_i TYPE i.
@@ -423,7 +432,17 @@ CLASS zcl_cpu_z80_bus_simple IMPLEMENTATION.
       WHEN 'y'. rv_code = 121. WHEN 'z'. rv_code = 122.
       WHEN '{'. rv_code = 123. WHEN '|'. rv_code = 124. WHEN '}'. rv_code = 125.
       WHEN '~'. rv_code = 126.
-      WHEN OTHERS. rv_code = 63.  " '?' for unknown
+      WHEN OTHERS.
+        " Handle control characters via code point
+        DATA lv_code TYPE i.
+        lv_code = cl_abap_conv_out_ce=>uccpi( iv_char ).
+        IF lv_code >= 0 AND lv_code <= 31.
+          rv_code = lv_code.  " Control characters 0-31
+        ELSEIF lv_code = 127.
+          rv_code = 127.  " DEL
+        ELSE.
+          rv_code = 63.  " '?' for truly unknown
+        ENDIF.
     ENDCASE.
   ENDMETHOD.
 

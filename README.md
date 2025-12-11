@@ -67,9 +67,18 @@ npm test
 ```
 cpm-abap/
 ├── src/
-│   ├── zcl_cpu_8080_v2.clas.abap              # i8080 CPU emulator
-│   ├── zcl_cpu_8080_v2.clas.testclasses.abap  # i8080 unit tests
 │   │
+│   │ ## CP/M Emulator (Z80-based)
+│   ├── zcl_cpm_emulator.clas.abap             # CP/M 2.2 emulator with BDOS
+│   ├── zcl_cpm_speedrun.clas.abap             # Speedrun test runner
+│   ├── zcpm_console.prog.abap                 # Interactive console (SAP GUI)
+│   ├── zcpm_zork_test.prog.abap               # ZORK test program
+│   ├── zcpm_io_test.prog.abap                 # I/O test (HELLO_NAME.COM)
+│   ├── zcpm_speedrun.prog.abap                # Speedrun test program
+│   ├── zcpm_debug_trace.prog.abap             # Debug trace viewer
+│   ├── zcpm_session_report.prog.abap          # Session report
+│   │
+│   │ ## Z80 CPU Emulator
 │   ├── zcl_cpu_z80.clas.abap                  # Z80 CPU emulator (main)
 │   ├── zcl_cpu_z80.clas.testclasses.abap      # Z80 unit tests (38 tests)
 │   ├── zif_cpu_z80_bus.intf.abap              # Bus interface (memory + I/O)
@@ -81,21 +90,30 @@ cpm-abap/
 │   ├── zcl_cpu_z80_prefix_ed.clas.abap        # ED prefix (extended ops)
 │   ├── zcl_cpu_z80_prefix_fd.clas.abap        # FD prefix (IY instructions)
 │   │
+│   │ ## i8080 CPU Emulator
+│   ├── zcl_cpu_8080_v2.clas.abap              # i8080 CPU emulator
+│   ├── zcl_cpu_8080_v2.clas.testclasses.abap  # i8080 unit tests
+│   │
+│   │ ## Z-Machine Interpreter
 │   ├── zif_zork_00_types.intf.abap            # Z-machine types (TS_/TT_/TY_)
 │   ├── zif_zork_00_io.intf.abap               # Z-machine I/O interface
 │   ├── zcl_zork_00_memory.clas.abap           # Z-machine memory manager
 │   ├── zcl_zork_00_stack.clas.abap            # Z-machine call stack
 │   ├── zcl_zork_00_decoder.clas.abap          # Z-machine instruction decoder
+│   ├── zcl_zork_00_executor.clas.abap         # Z-machine instruction executor
 │   ├── zcl_zork_00_io_console.clas.abap       # Console I/O implementation
+│   ├── zcl_zork_00_io_html.clas.abap          # HTML/SAP GUI I/O
+│   ├── zork_00_console.prog.abap              # Z-machine console program
 │   └── *.testclasses.abap                     # Unit tests for each class
 │
-├── src-sap/                                    # SAP-specific files (GUI)
-│   ├── zcl_zork_00_io_html.clas.abap          # HTML/SAP GUI I/O
-│   └── zork_00_console.prog.abap              # Main program
+├── z80-python/                                 # Python Z80 reference impl
+│   ├── cpm_z80.py                             # CP/M emulator in Python
+│   ├── z80.py                                 # Z80 CPU core
+│   ├── HELLO_NAME.COM                         # Test program binary
+│   └── hello_name.asm                         # Test program source
 │
 ├── output/                                     # Transpiled JavaScript
 ├── node_modules/                               # npm packages
-├── docs/                                       # Documentation
 ├── package.json
 ├── abaplint.json
 └── README.md

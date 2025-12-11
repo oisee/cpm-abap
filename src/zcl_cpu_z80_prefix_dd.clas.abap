@@ -252,23 +252,23 @@ CLASS zcl_cpu_z80_prefix_dd IMPLEMENTATION.
         set_index_reg( lv_result ).
         rv_cycles = 15.
 
-      " LD r,(IX+d) and LD (IX+d),r - opcodes 70-77, 46, 4E, 56, 5E, 66, 6E, 7E
-      WHEN 70. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_b( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 71. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_c( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 72. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_d( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 73. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_e( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 74. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_h( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 75. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_l( ) iv_disp = lv_disp ). rv_cycles = 19.
-      WHEN 77. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_a( ) iv_disp = lv_disp ). rv_cycles = 19.
-
-      WHEN 70. " LD (IX+d),B - duplicate removed, handled above
+      " LD r,(IX+d) - opcodes 46, 4E, 56, 5E, 66, 6E, 7E
+      WHEN 70. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_b( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 78. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_c( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 86. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_d( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 94. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_e( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 102. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_h( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 110. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_l( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
       WHEN 126. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_a( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
-      WHEN 70. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->set_b( get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.
+
+      " LD (IX+d),r - opcodes 70-75, 77
+      WHEN 112. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_b( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 113. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_c( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 114. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_d( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 115. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_e( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 116. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_h( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 117. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_l( ) iv_disp = lv_disp ). rv_cycles = 19.
+      WHEN 119. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. set_reg8( iv_idx = 6 iv_val = mo_cpu->get_a( ) iv_disp = lv_disp ). rv_cycles = 19.
 
       " ALU operations with (IX+d)
       WHEN 134. lv_disp = mo_cpu->fetch_byte( ). IF lv_disp >= 128. lv_disp = lv_disp - 256. ENDIF. mo_cpu->alu_add8( iv_val = get_reg8( iv_idx = 6 iv_disp = lv_disp ) ). rv_cycles = 19.

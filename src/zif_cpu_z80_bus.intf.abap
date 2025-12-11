@@ -45,4 +45,7 @@ INTERFACE zif_cpu_z80_bus PUBLIC.
   METHODS provide_input
     IMPORTING iv_text TYPE string.
 
+  " Remove last character from output buffer (for backspace handling)
+  METHODS remove_last_output.
+
 ENDINTERFACE.
