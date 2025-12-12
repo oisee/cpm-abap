@@ -468,5 +468,76 @@ result = emu.run(emu.print_string("Hello!") + brk())
 
 ---
 
+## Session Log: December 12, 2025 (Session 3)
+
+### 6502 Echo Program Complete!
+
+First interactive 6502 program running on Z80 threaded code emulator.
+
+**Program Features:**
+- Reads keyboard input via RDKEY trap ($FD0C)
+- Echoes characters via COUT trap ($FDED)
+- Doubles digits 0-9 (e.g., "42" → "4422")
+- Exits on ESC key ($1B)
+
+**Test Result:**
+```
+Input:  "Test 42 OK!\x1b"
+Output: "Test 4422 OK!"
+```
+
+### Code (29 bytes of 6502)
+
+```asm
+        ORG $0800
+loop:   JSR $FD0C       ; RDKEY - read key into A
+        CMP #$00        ; no input?
+        BEQ loop        ; wait for input
+        CMP #$1B        ; ESC?
+        BEQ done        ; exit
+        JSR $FDED       ; COUT - print char
+        CMP #'0'        ; below '0'?
+        BCC loop        ; not a digit
+        CMP #'9'+1      ; above '9'?
+        BCS loop        ; not a digit
+        JSR $FDED       ; print digit again (double!)
+        JMP loop
+done:   BRK
+```
+
+### Fixes Applied
+
+1. **RDKEY trap not in trap table** - Added all Apple II ROM traps:
+   - $FDED → TRAP_COUT (character output)
+   - $FD0C → TRAP_RDKEY (read key)
+   - $FD6A → TRAP_GETLN (get line)
+   - $FC58 → TRAP_HOME (clear screen)
+
+### Current Capabilities
+
+| Feature | Status |
+|---------|--------|
+| Load/Store (imm, zp, abs) | ✓ |
+| Arithmetic (ADC, SBC) | ✓ |
+| Logic (AND, ORA, EOR) | ✓ |
+| Compare (CMP, CPX, CPY) | ✓ |
+| Branches (BEQ, BNE, BCS, BCC, BMI, BPL) | ✓ |
+| Jumps (JMP, JSR, RTS) | ✓ |
+| Stack (PHA, PLA, PHP, PLP) | ✓ |
+| Transfers (TAX, TXA, TAY, TYA) | ✓ |
+| Inc/Dec (INX, DEX, INY, DEY, INC, DEC) | ✓ |
+| ROM Traps (COUT, RDKEY, GETLN, HOME) | ✓ |
+| Indexed addressing (abs,X abs,Y zp,X) | ✓ |
+| Indirect addressing ((zp),Y (zp,X)) | ✓ |
+
+### What's Next
+
+- [ ] Add more opcodes as needed
+- [ ] Test with larger 6502 programs
+- [ ] Port to real ZX Spectrum 128K
+- [ ] Try running simple Apple II software
+
+---
+
 *Last updated: 2025-12-12*
-*Current phase: Phase 3 - Branches Working, Ready for Echo Program*
+*Current phase: Phase 3 - Echo Program Working!*
