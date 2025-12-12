@@ -43,8 +43,20 @@ Z80 asm = весь runtime, включая HLE traps
 
 ## Phase 3 Design: Z80 Native HLE
 
-### Memory Map
+### Two Banking Designs
 
+We have two banking designs optimized for different targets:
+
+| Design | Banks | Window | Target | Status |
+|--------|-------|--------|--------|--------|
+| **A** (primary) | 8 × 16KB | $C000-$FFFF | ZX 128K, real HW | Active |
+| **B** (alternative) | 4 × 32KB | $0000-$7FFF | VZ80, ZX Next | Future |
+
+---
+
+### Design A: 16KB @ $C000 (Primary)
+
+**Memory Map:**
 ```
 Z80 Memory:
 $6000-$6FFF   HLE Trap handlers (COUT, GETLN, HOME, etc.)
@@ -56,14 +68,11 @@ $8300-$BFFF   Runtime code, shadow stack
 $C000-$FFFF   Banked window (16KB, 8 banks)
 ```
 
-### Banking Architecture
-
+**Banking:**
 ```
 6502 space:  64KB
 × 2 expansion: 128KB
 ÷ 8 banks:     16KB per bank
-
-Bank window: $C000-$FFFF (16KB)
 ```
 
 **Bank Mapping:**
@@ -79,19 +88,17 @@ Bank window: $C000-$FFFF (16KB)
 | 6    | $C000-$DFFF   | $C000-$FFFF   | $C0       |
 | 7    | $E000-$FFFF   | $C000-$FFFF   | $E0       |
 
-### Optimized Address Translation
-
+**Address Translation (10 instructions):**
 ```z80
 ; READ_6502: DE = 6502 addr → A = byte value
-; ~12 instructions
 
 READ_6502:
-    ; 1. Bank select (upper 3 bits)
+    ; 1. Bank select (upper 3 bits direct to port)
     LD A, D
     AND $E0
-    OUT (0), A          ; select bank
+    OUT (0), A          ; port accepts bits 7-5 directly
 
-    ; 2. Calculate Z80 address (optimized)
+    ; 2. Calculate Z80 address
     LD A, D
     AND $1F             ; offset high (5 bits for 8KB)
     SLA E               ; × 2 low byte
@@ -102,6 +109,64 @@ READ_6502:
     LD A, (DE)          ; read byte
     RET
 ```
+
+---
+
+### Design B: 32KB @ $0000 (Alternative - VZ80/Next)
+
+**Memory Map:**
+```
+Z80 Memory:
+$0000-$7FFF   Banked window (32KB, 4 banks) ← code lives here
+$8000-$80FF   6502 Zero Page (linear)
+$8100-$81FF   6502 Stack (linear)
+$8200-$8FFF   Buffers, runtime data
+$9000-$9FFF   HLE Trap handlers
+$A000-$BFFF   Handler Table (expanded)
+```
+
+**Banking:**
+```
+6502 space:  64KB
+× 2 expansion: 128KB
+÷ 4 banks:     32KB per bank
+```
+
+**Bank Mapping:**
+
+| Bank | 6502 Range    | Z80 Window    | OUT Value |
+|------|---------------|---------------|-----------|
+| 0    | $0000-$3FFF   | $0000-$7FFF   | $00       |
+| 1    | $4000-$7FFF   | $0000-$7FFF   | $40       |
+| 2    | $8000-$BFFF   | $0000-$7FFF   | $80       |
+| 3    | $C000-$FFFF   | $0000-$7FFF   | $C0       |
+
+**Address Translation (8 instructions - faster!):**
+```z80
+; READ_6502_FAST: DE = 6502 addr → A = byte value
+
+READ_6502_FAST:
+    ; 1. Bank select (upper 2 bits direct to port)
+    LD A, D
+    AND $C0
+    OUT (0), A          ; port accepts bits 7-6 directly
+
+    ; 2. Calculate Z80 address (no base needed!)
+    LD A, D
+    AND $3F             ; offset high (6 bits for 16KB)
+    SLA E               ; × 2 low byte
+    RLA                 ; × 2 high byte + carry
+    LD D, A             ; DE = Z80 address (no OR needed!)
+
+    LD A, (DE)          ; read byte
+    RET
+```
+
+**Advantages of Design B:**
+- 2 fewer instructions (no `OR $C0`)
+- Simpler address math
+- Works on ZX Next (8KB MMU can map anywhere)
+- Ideal for VZ80 emulator
 
 ### Handler Types
 
