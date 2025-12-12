@@ -403,5 +403,70 @@ BRK
 
 ---
 
+## Session Log: December 12, 2025 (Session 2)
+
+### Branch Instructions Fixed!
+
+All branch instructions now work correctly:
+- **BEQ/BNE** (equal/not equal) - ✓
+- **BCS/BCC** (carry set/clear) - ✓ (fixed inverted carry logic)
+- **BMI/BPL** (minus/plus) - ✓
+
+### Key Bug Fixes
+
+1. **LDX #imm double-pop bug**: Handler was popping twice, consuming next instruction's bytes
+   - Fixed by removing redundant `pop_hl()`
+
+2. **Branch SP modification incomplete**: Branch handlers popped offset but didn't modify SP
+   - Added proper sign-extension and SP update code
+
+3. **Carry flag inversion**: Z80 and 6502 have opposite carry semantics for CMP
+   - 6502: C=1 when A >= M (no borrow)
+   - Z80: C=1 when A < M (borrow)
+   - Fixed BCS/BCC to check inverted condition
+
+### Test Results
+
+```
+✓ BEQ taken: 'Y' == 'Y'
+✓ BEQ not taken: 'AB' == 'AB'
+✓ BNE taken: 'Y' == 'Y'
+✓ BNE not taken: 'AB' == 'AB'
+✓ BCS taken (5>=3): 'Y' == 'Y'
+✓ BCS not taken (3<5): 'AB' == 'AB'
+✓ BCC taken (3<5): 'Y' == 'Y'
+✓ BCC not taken (5>=3): 'AB' == 'AB'
+✓ Loop 1-5: '12345' == '12345'
+
+9/9 tests passed
+```
+
+### Interactive Testing Tool
+
+Created `interactive_6502.py` for easy testing:
+
+```python
+from interactive_6502 import *
+emu = Emu6502()
+result = emu.run(emu.print_string("Hello!") + brk())
+# Output: 'Hello!'
+```
+
+### Files Modified
+
+- `gen_z80_runtime.py` - Fixed LDX handler, branch instructions, added JP P/M
+- `z80.py` - Added ED prefix instructions (LD (nn),rp)
+- `interactive_6502.py` - New interactive testing tool
+- `runtime_6502_data.py` - Regenerated with fixes
+
+### Statistics
+
+- **61 opcodes** implemented
+- **679 bytes** of handler code
+- **9/9** branch tests passing
+- All basic tests (HI, ABC subroutine, count loop) passing
+
+---
+
 *Last updated: 2025-12-12*
-*Current phase: Phase 3 - First Test PASSED*
+*Current phase: Phase 3 - Branches Working, Ready for Echo Program*

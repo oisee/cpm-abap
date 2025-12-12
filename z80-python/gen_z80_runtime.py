@@ -321,6 +321,16 @@ class Z80Asm:
         self.emit(0xC3, 0x00, 0x00)
         self.fixups.append((len(self.code) - 2, label, 'abs'))
 
+    def jp_p_label(self, label: str):
+        """JP P, nn - Jump if positive (sign flag clear)"""
+        self.emit(0xF2, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
+    def jp_m_label(self, label: str):
+        """JP M, nn - Jump if minus (sign flag set)"""
+        self.emit(0xFA, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
     def call_label(self, label: str):
         self.emit(0xCD, 0x00, 0x00)
         self.fixups.append((len(self.code) - 2, label, 'abs'))
@@ -659,17 +669,10 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # LDX #imm ($A2)
     asm.label('H_LDX_IMM')
-    asm.pop_hl()
-    asm.ld_b_a()             # save A
-    asm.ld_a_l()
-    asm.or_a()               # set flags
-    asm.ld_b_a()             # B = X = value
-    # Restore A... tricky. We need flags from L but A preserved
-    # Actually, let's just update X and set flags based on X
-    asm.pop_hl()
+    asm.pop_hl()             # L = immediate value
     asm.ld_b_l()             # B = X = immediate
     asm.ld_a_b()
-    asm.or_a()               # set flags for X
+    asm.or_a()               # set Z/N flags for X
     asm.ret()
 
     # LDY #imm ($A0)
@@ -1085,63 +1088,74 @@ def generate_opcode_handlers() -> Z80Asm:
     # ===== BRANCHES =====
     # For branches, we need to handle the relative offset
     # The offset is in the threaded stream as a handler-encoded byte
+    # Offset is relative to instruction AFTER branch, SP already points there after POP
+    # We need: SP = SP + (signed_offset * 2)
 
-    # BEQ ($F0)
+    # Helper: emit branch-taken code (call after conditional JR that skips branch)
+    def emit_branch_taken(asm):
+        """Emit code to take branch: add signed offset*2 to SP"""
+        asm.ld_a_l()             # A = offset (L from popped value)
+        asm.ld_e_a()             # E = offset
+        asm.add_a_a()            # Sign bit into carry
+        asm.sbc_a_a()            # A = $00 (positive) or $FF (negative)
+        asm.ld_d_a()             # DE = sign-extended offset
+        asm.sla_e()              # *2 low byte
+        asm.rl_d()               # *2 high byte (DE = offset * 2)
+        asm.ex_de_hl()           # HL = offset*2
+        asm.add_hl_sp()          # HL = SP + offset*2
+        asm.ld_sp_hl()           # SP = new PC
+
+    # BEQ ($F0) - Branch if Equal (Z=1)
     asm.label('H_BEQ')
     asm.pop_hl()             # L = offset
     asm.jr_nz_label('_beq_no')
-    # Take branch: adjust SP by offset
-    # This is tricky... we need to add L to SP
-    asm.ld_a_l()
-    asm.ld_e_a()
-    # Sign extend to DE
-    asm.add_a_a()            # carry = sign bit
-    asm.sbc_a_a()            # A = 0 or $FF
-    asm.ld_d_a()
-    # DE = signed offset, need to multiply by 2 (handler expansion)
-    asm.sla_e()
-    asm.rl_d()
-    # Add to SP... but we can't easily do that
-    # Alternative: use HL
-    asm.add_hl_de()          # HL = SP + offset*2 (but HL was popped value!)
-    # Actually we need current SP...
-    # This is getting complicated. Let's use a simpler approach:
-    # Store offset, manipulate SP later
+    emit_branch_taken(asm)
     asm.label('_beq_no')
     asm.ret()
 
-    # BNE ($D0)
+    # BNE ($D0) - Branch if Not Equal (Z=0)
     asm.label('H_BNE')
     asm.pop_hl()
     asm.jr_z_label('_bne_no')
-    # Take branch - same complexity as BEQ
+    emit_branch_taken(asm)
     asm.label('_bne_no')
     asm.ret()
 
-    # BCS ($B0)
+    # BCS ($B0) - Branch if Carry Set (6502 C=1)
+    # Note: Z80 carry is OPPOSITE of 6502 for CMP
+    # 6502 CMP sets C=1 for A >= M, Z80 CP sets C=1 for A < M
+    # So 6502 C=1 ↔ Z80 C=0
     asm.label('H_BCS')
     asm.pop_hl()
-    asm.jr_nc_label('_bcs_no')
+    asm.jr_c_label('_bcs_no')    # Skip branch when Z80 C=1 (= 6502 C=0)
+    emit_branch_taken(asm)
     asm.label('_bcs_no')
     asm.ret()
 
-    # BCC ($90)
+    # BCC ($90) - Branch if Carry Clear (6502 C=0)
+    # 6502 C=0 ↔ Z80 C=1
     asm.label('H_BCC')
     asm.pop_hl()
-    asm.jr_c_label('_bcc_no')
+    asm.jr_nc_label('_bcc_no')   # Skip branch when Z80 C=0 (= 6502 C=1)
+    emit_branch_taken(asm)
     asm.label('_bcc_no')
     asm.ret()
 
-    # BMI ($30)
+    # BMI ($30) - Branch if Minus (N=1)
+    # Z80 Sign flag after CMP/math ops reflects bit 7
     asm.label('H_BMI')
     asm.pop_hl()
-    # Check sign flag (bit 7 of last result)
-    # Z80 S flag = bit 7, so JP M would work if flags are set
+    asm.jp_p_label('_bmi_no')    # JP P = jump if positive (sign flag clear)
+    emit_branch_taken(asm)
+    asm.label('_bmi_no')
     asm.ret()
 
-    # BPL ($10)
+    # BPL ($10) - Branch if Plus (N=0)
     asm.label('H_BPL')
     asm.pop_hl()
+    asm.jp_m_label('_bpl_no')    # JP M = jump if minus (sign flag set)
+    emit_branch_taken(asm)
+    asm.label('_bpl_no')
     asm.ret()
 
     # ===== JUMPS =====
