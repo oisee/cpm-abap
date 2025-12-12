@@ -39,6 +39,42 @@ TEST_6502 = bytes([
     0x00,             # BRK
 ])
 
+# Test program with actual subroutine (tests JSR/RTS with shadow stack)
+# Main: JSR to PRINT_ABC, which prints "ABC" and returns
+#
+# ORG $0800
+# main:
+#         JSR print_abc   ; Call subroutine at $080A
+#         LDA #$0A        ; newline
+#         JSR $FDED       ; COUT
+#         BRK
+#
+# print_abc: ($080A)
+#         LDA #$41        ; 'A'
+#         JSR $FDED
+#         LDA #$42        ; 'B'
+#         JSR $FDED
+#         LDA #$43        ; 'C'
+#         JSR $FDED
+#         RTS
+
+TEST_6502_SUBROUTINE = bytes([
+    # main ($0800)
+    0x20, 0x0A, 0x08, # JSR $080A (print_abc)
+    0xA9, 0x0A,       # LDA #$0A (newline)
+    0x20, 0xED, 0xFD, # JSR $FDED (COUT)
+    0x00,             # BRK
+    0x00,             # padding to $080A
+    # print_abc ($080A)
+    0xA9, 0x41,       # LDA #'A'
+    0x20, 0xED, 0xFD, # JSR $FDED
+    0xA9, 0x42,       # LDA #'B'
+    0x20, 0xED, 0xFD, # JSR $FDED
+    0xA9, 0x43,       # LDA #'C'
+    0x20, 0xED, 0xFD, # JSR $FDED
+    0x60,             # RTS
+])
+
 # =============================================================================
 # CONVERTER
 # =============================================================================
@@ -102,9 +138,10 @@ def create_trap_table() -> bytes:
 # MAIN TEST
 # =============================================================================
 
-def main():
+def run_test(test_code: bytes, test_name: str, trace_count: int = 50, verbose: bool = True):
+    """Run a 6502 test program"""
     print("=" * 60)
-    print("6502 Threaded Code Runtime Test")
+    print(f"Test: {test_name}")
     print("=" * 60)
 
     # Create VZ80
@@ -114,88 +151,70 @@ def main():
     # Track output
     output = []
     def on_output(ch):
-        # ch is already a character string from vz80
         output.append(ch)
         print(ch, end='', flush=True)
     bus.on_output = on_output
 
     # Load runtime components into fixed memory
-    print("\nLoading runtime...")
+    if verbose:
+        print("\nLoading runtime...")
 
     # HLE traps at $6000
     for i, b in enumerate(HLE_CODE):
         bus.fixed_memory[HLE_ORG + i] = b
-    print(f"  HLE traps: ${HLE_ORG:04X}-${HLE_ORG + len(HLE_CODE):04X} ({len(HLE_CODE)} bytes)")
 
     # Opcode handlers at $6100
     for i, b in enumerate(HANDLERS_CODE):
         bus.fixed_memory[HANDLERS_ORG + i] = b
-    print(f"  Handlers:  ${HANDLERS_ORG:04X}-${HANDLERS_ORG + len(HANDLERS_CODE):04X} ({len(HANDLERS_CODE)} bytes)")
 
     # Handler table at $7000
     for i, b in enumerate(HANDLER_TABLE):
         bus.fixed_memory[TABLE_ORG + i] = b
-    print(f"  Table:     ${TABLE_ORG:04X}-${TABLE_ORG + len(HANDLER_TABLE):04X} ({len(HANDLER_TABLE)} bytes)")
 
     # Runtime at $8300
     for i, b in enumerate(RUNTIME_CODE):
         bus.fixed_memory[RUNTIME_ORG + i] = b
-    print(f"  Runtime:   ${RUNTIME_ORG:04X}-${RUNTIME_ORG + len(RUNTIME_CODE):04X} ({len(RUNTIME_CODE)} bytes)")
 
     # Trap table at $8C00
     trap_table = create_trap_table()
     for i, b in enumerate(trap_table):
         bus.fixed_memory[0x8C00 + i] = b
-    print(f"  Traps:     $8C00-$8FFF ({len(trap_table)} bytes)")
 
-    # Debug: show trap entries
-    print("\n  Trap table entries:")
-    for name, rom_addr in [('COUT', 0xFDED), ('GETLN', 0xFD6A), ('HOME', 0xFC58)]:
-        offset = rom_addr & 0x03FF
-        mem_addr = 0x8C00 + offset
-        lo = bus.fixed_memory[mem_addr]
-        hi = bus.fixed_memory[mem_addr + 1]
-        target = lo | (hi << 8)
-        expected = LABELS.get(f'TRAP_{name}', 0)
-        print(f"    {name} ${rom_addr:04X} -> ${mem_addr:04X}: ${target:04X} (expected ${expected:04X})")
+    if verbose:
+        print(f"  Loaded runtime ({len(HLE_CODE) + len(HANDLERS_CODE) + len(HANDLER_TABLE) + len(RUNTIME_CODE) + len(trap_table)} bytes)")
 
     # Convert 6502 program to threaded code
-    print("\nConverting 6502 program...")
-    print(f"  Original: {len(TEST_6502)} bytes")
-    for i, b in enumerate(TEST_6502):
-        print(f"    ${0x0800+i:04X}: ${b:02X}")
+    threaded = convert_6502_to_threaded(test_code)
+    if verbose:
+        print(f"  Converted {len(test_code)} -> {len(threaded)} bytes")
 
-    threaded = convert_6502_to_threaded(TEST_6502)
-    print(f"  Threaded: {len(threaded)} bytes")
-
-    # Load threaded code into bank 0 at $C000
-    # (6502 $0800 -> Z80 $C000 + $0800*2 = $D000)
-    # Actually for simplicity, put it at start of bank 0
-    code_addr = 0xC000
+    # Load threaded code into bank 0
+    # 6502 code starting at $0800 maps to Z80 $D000 in bank 0
+    # Formula: Z80_addr = $C000 + (6502_addr & $1FFF) * 2
+    # For $0800: Z80_addr = $C000 + $1000 = $D000
+    code_offset = 0x0800 * 2  # = $1000
+    code_addr = 0xC000 + code_offset  # = $D000
     for i, b in enumerate(threaded):
-        bus.banked_memory[0][i] = b
-    print(f"  Loaded at: ${code_addr:04X} (bank 0)")
+        bus.banked_memory[0][code_offset + i] = b
 
     # Initialize 6502 state
     bus.fixed_memory[0x8F00] = 0  # ZP_SYNCED = 0
     bus.fixed_memory[0x8F01] = 0  # STACK_SYNCED = 0
     bus.fixed_memory[0x8F02] = 0xFF  # REG_S = $FF (stack pointer)
 
-    # Set up Z80 to start executing
-    # SP = address of threaded code (for RET-threading)
-    cpu.sp = code_addr
+    # Initialize shadow stack pointer (grows downward from $8EFE)
+    bus.fixed_memory[0x8EFE] = 0xFE  # low byte
+    bus.fixed_memory[0x8EFF] = 0x8E  # high byte -> $8EFE (top of stack)
 
-    # Select bank 0
+    # Set up Z80 to start executing
+    cpu.sp = code_addr
     bus.current_bank = 0
 
     # Start with a RET to kick off threading
-    # Put RET at $8200 and set PC there
     bus.fixed_memory[0x8200] = 0xC9  # RET
     cpu.pc = 0x8200
 
-    print("\n" + "=" * 60)
-    print("Running... (output below)")
-    print("=" * 60)
+    print("\nRunning...")
     print()
 
     # Execute!
@@ -203,41 +222,56 @@ def main():
     cycles = 0
     halted = False
 
-    # Debug: trace first N instructions
-    TRACE_COUNT = 50
-
     try:
         while cycles < max_cycles and not halted:
-            # Check for HALT
             opcode = bus.read_mem(cpu.pc)
             if opcode == 0x76:  # HALT
-                print(f"\n[HALT at ${cpu.pc:04X}]")
                 halted = True
                 break
 
             # Trace
-            if cycles < TRACE_COUNT:
-                # Get next few bytes
+            if cycles < trace_count:
                 b1 = bus.read_mem(cpu.pc + 1) if cpu.pc + 1 < 0x10000 else 0
                 b2 = bus.read_mem(cpu.pc + 2) if cpu.pc + 2 < 0x10000 else 0
                 stack_val = bus.read_mem(cpu.sp) | (bus.read_mem(cpu.sp + 1) << 8) if cpu.sp < 0xFFFE else 0
-                print(f"[{cycles:3d}] PC=${cpu.pc:04X} ({opcode:02X} {b1:02X} {b2:02X}) SP=${cpu.sp:04X} [${stack_val:04X}] A=${cpu.a:02X} BC=${cpu.b:02X}{cpu.c:02X} DE={cpu.de:04X} HL={cpu.hl:04X}")
+                print(f"[{cycles:3d}] PC=${cpu.pc:04X} SP=${cpu.sp:04X} A=${cpu.a:02X}")
 
-            # Step one instruction
             cpu.step()
             cycles += 1
 
     except Exception as e:
         print(f"\n[ERROR at cycle {cycles}: {e}]")
         print(f"  PC: ${cpu.pc:04X}, SP: ${cpu.sp:04X}")
-        print(f"  A: ${cpu.a:02X}, B: ${cpu.b:02X}, C: ${cpu.c:02X}")
         import traceback
         traceback.print_exc()
+        return None
 
-    print("\n" + "=" * 60)
-    print(f"Finished after {cycles} cycles")
-    print(f"Output: {''.join(output)!r}")
+    result = ''.join(output)
+    print(f"\n[HALT after {cycles} cycles]")
+    print(f"Output: {result!r}")
     print("=" * 60)
+    return result
+
+
+def main():
+    # Test 1: Simple HI program (trap-only JSR)
+    print("\n" + "=" * 60)
+    print("TEST 1: Simple 'HI' program")
+    print("=" * 60)
+    result1 = run_test(TEST_6502, "Print HI", trace_count=0)
+    assert result1 == "HI\n", f"Expected 'HI\\n', got {result1!r}"
+    print("PASSED!")
+
+    # Test 2: Subroutine test (JSR/RTS with shadow stack)
+    print("\n" + "=" * 60)
+    print("TEST 2: Subroutine test (JSR/RTS)")
+    print("=" * 60)
+    result2 = run_test(TEST_6502_SUBROUTINE, "Print ABC via subroutine", trace_count=100)
+    expected2 = "ABC\n"
+    if result2 == expected2:
+        print("PASSED!")
+    else:
+        print(f"FAILED: Expected {expected2!r}, got {result2!r}")
 
 
 if __name__ == '__main__':

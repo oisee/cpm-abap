@@ -953,10 +953,53 @@ class Z80:
             self.fetch8()
             cycles = 8
 
-        # ED prefix - simplified
+        # ED prefix instructions
         elif opcode == 0xED:
-            self.fetch8()
-            cycles = 8
+            ed_op = self.fetch8()
+            if ed_op == 0x53:  # LD (nn), DE
+                addr = self.fetch16()
+                self.bus.write_mem(addr, self.e)
+                self.bus.write_mem(addr + 1, self.d)
+                cycles = 20
+            elif ed_op == 0x5B:  # LD DE, (nn)
+                addr = self.fetch16()
+                self.e = self.bus.read_mem(addr)
+                self.d = self.bus.read_mem(addr + 1)
+                cycles = 20
+            elif ed_op == 0x43:  # LD (nn), BC
+                addr = self.fetch16()
+                self.bus.write_mem(addr, self.c)
+                self.bus.write_mem(addr + 1, self.b)
+                cycles = 20
+            elif ed_op == 0x4B:  # LD BC, (nn)
+                addr = self.fetch16()
+                self.c = self.bus.read_mem(addr)
+                self.b = self.bus.read_mem(addr + 1)
+                cycles = 20
+            elif ed_op == 0x73:  # LD (nn), SP
+                addr = self.fetch16()
+                self.bus.write_mem(addr, self.sp & 0xFF)
+                self.bus.write_mem(addr + 1, (self.sp >> 8) & 0xFF)
+                cycles = 20
+            elif ed_op == 0x7B:  # LD SP, (nn)
+                addr = self.fetch16()
+                lo = self.bus.read_mem(addr)
+                hi = self.bus.read_mem(addr + 1)
+                self.sp = (hi << 8) | lo
+                cycles = 20
+            elif ed_op == 0x63:  # LD (nn), HL (undocumented but used)
+                addr = self.fetch16()
+                self.bus.write_mem(addr, self.l)
+                self.bus.write_mem(addr + 1, self.h)
+                cycles = 20
+            elif ed_op == 0x6B:  # LD HL, (nn) (undocumented but used)
+                addr = self.fetch16()
+                self.l = self.bus.read_mem(addr)
+                self.h = self.bus.read_mem(addr + 1)
+                cycles = 20
+            else:
+                # Unimplemented ED instruction - NOP
+                cycles = 8
 
         # FD prefix (IY) - simplified
         elif opcode == 0xFD:

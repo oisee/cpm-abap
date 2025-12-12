@@ -122,6 +122,7 @@ class Z80Asm:
     def add_hl_bc(self): self.emit(0x09)
     def add_hl_de(self): self.emit(0x19)
     def add_hl_hl(self): self.emit(0x29)
+    def add_hl_sp(self): self.emit(0x39)
 
     def push_af(self):   self.emit(0xF5)
     def push_bc(self):   self.emit(0xC5)
@@ -579,6 +580,30 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.or_a()
     asm.ret()
 
+    # LDX zp,Y ($B6)
+    asm.label('H_LDX_ZPY')
+    asm.pop_hl()
+    asm.ld_a_l()
+    asm.add_a_c()            # A = base + Y
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    asm.ld_b_mem_hl()        # B = X = value
+    asm.ld_a_b()
+    asm.or_a()
+    asm.ret()
+
+    # LDY zp,X ($B4)
+    asm.label('H_LDY_ZPX')
+    asm.pop_hl()
+    asm.ld_a_l()
+    asm.add_a_b()            # A = base + X
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    asm.ld_c_mem_hl()        # C = Y = value
+    asm.ld_a_c()
+    asm.or_a()
+    asm.ret()
+
     # LDA abs ($AD)
     asm.label('H_LDA_ABS')
     # Inline operand extraction (can't use CALL - corrupts threading stack!)
@@ -587,6 +612,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_e()             # D = addr_hi
     asm.ld_e_l()             # E = addr_lo, DE = 6502 address
     # Inline READ_6502
+    asm.label('_lda_abs_read')
     asm.ld_a_d()
     asm.and_n(0xE0)
     asm.out_n_a(0x00)        # bank select
@@ -599,6 +625,37 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_a_mem_de()        # A = value
     asm.or_a()               # set flags
     asm.ret()
+
+    # LDA abs,X ($BD)
+    asm.label('H_LDA_ABSX')
+    asm.pop_hl()             # L = addr_lo
+    asm.pop_de()             # E = addr_hi
+    asm.ld_d_e()
+    asm.ld_e_l()             # DE = base addr
+    # Add X (in B register) to address
+    asm.ld_a_e()
+    asm.add_a_b()            # A = addr_lo + X
+    asm.ld_e_a()
+    asm.jr_nc_label('_lda_absx_nc')
+    asm.inc_d()              # Carry to high byte
+    asm.label('_lda_absx_nc')
+    # Now read from DE
+    asm.jr_label('_lda_abs_read')
+
+    # LDA abs,Y ($B9)
+    asm.label('H_LDA_ABSY')
+    asm.pop_hl()
+    asm.pop_de()
+    asm.ld_d_e()
+    asm.ld_e_l()             # DE = base addr
+    # Add Y (in C register) to address
+    asm.ld_a_e()
+    asm.add_a_c()            # A = addr_lo + Y
+    asm.ld_e_a()
+    asm.jr_nc_label('_lda_absy_nc')
+    asm.inc_d()
+    asm.label('_lda_absy_nc')
+    asm.jr_label('_lda_abs_read')
 
     # LDX #imm ($A2)
     asm.label('H_LDX_IMM')
@@ -637,6 +694,23 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ex_af_af()
     asm.ret()
 
+    # STA zp,X ($95)
+    asm.label('H_STA_ZPX')
+    asm.ex_af_af()           # Save A to A'
+    asm.pop_hl()             # L = zp base
+    asm.ld_a_l()
+    asm.add_a_b()            # A = zp + X
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    asm.ex_af_af()           # Restore A
+    asm.ld_mem_hl_a()        # Store A to ZP+X
+    # Clear ZP sync
+    asm.ex_af_af()
+    asm.xor_a()
+    asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
+    asm.ex_af_af()
+    asm.ret()
+
     # STA abs ($8D)
     asm.label('H_STA_ABS')
     asm.ex_af_af()           # save 6502 A to A'
@@ -646,6 +720,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_e()             # D = addr_hi
     asm.ld_e_l()             # E = addr_lo, DE = 6502 address
     # Inline WRITE_6502
+    asm.label('_sta_abs_write')
     asm.ld_a_d()
     asm.and_n(0xE0)
     asm.out_n_a(0x00)        # bank select
@@ -663,6 +738,161 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_mem_de_a()        # write high byte (handler)
     asm.ret()
 
+    # STA abs,X ($9D)
+    asm.label('H_STA_ABSX')
+    asm.ex_af_af()           # save 6502 A
+    asm.pop_hl()
+    asm.pop_de()
+    asm.ld_d_e()
+    asm.ld_e_l()             # DE = base addr
+    # Add X
+    asm.ld_a_e()
+    asm.add_a_b()
+    asm.ld_e_a()
+    asm.jr_nc_label('_sta_absx_nc')
+    asm.inc_d()
+    asm.label('_sta_absx_nc')
+    asm.jr_label('_sta_abs_write')
+
+    # STA abs,Y ($99)
+    asm.label('H_STA_ABSY')
+    asm.ex_af_af()
+    asm.pop_hl()
+    asm.pop_de()
+    asm.ld_d_e()
+    asm.ld_e_l()
+    asm.ld_a_e()
+    asm.add_a_c()
+    asm.ld_e_a()
+    asm.jr_nc_label('_sta_absy_nc')
+    asm.inc_d()
+    asm.label('_sta_absy_nc')
+    asm.jr_label('_sta_abs_write')
+
+    # ===== INDIRECT ADDRESSING =====
+
+    # LDA (zp),Y ($B1) - Post-indexed indirect
+    # Address at (ZP) + Y -> A
+    asm.label('H_LDA_INDY')
+    asm.pop_hl()             # L = zp addr
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)  # HL = $80xx (ZP address)
+    # Read 16-bit address from ZP
+    asm.ld_e_mem_hl()        # E = low byte of pointer
+    asm.inc_l()              # Next ZP byte (wraps within ZP)
+    asm.ld_d_mem_hl()        # D = high byte of pointer
+    # Add Y to address
+    asm.ld_a_e()
+    asm.add_a_c()            # A = ptr_lo + Y
+    asm.ld_e_a()
+    asm.jr_nc_label('_lda_indy_nc')
+    asm.inc_d()              # Carry to high byte
+    asm.label('_lda_indy_nc')
+    # Now DE = final 6502 address, inline READ_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()
+    asm.ld_a_mem_de()
+    asm.or_a()
+    asm.ret()
+
+    # STA (zp),Y ($91) - Post-indexed indirect
+    asm.label('H_STA_INDY')
+    asm.ex_af_af()           # Save 6502 A
+    asm.pop_hl()             # L = zp addr
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    # Read 16-bit address from ZP
+    asm.ld_e_mem_hl()
+    asm.inc_l()
+    asm.ld_d_mem_hl()
+    # Add Y
+    asm.ld_a_e()
+    asm.add_a_c()
+    asm.ld_e_a()
+    asm.jr_nc_label('_sta_indy_nc')
+    asm.inc_d()
+    asm.label('_sta_indy_nc')
+    # Inline WRITE_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()
+    asm.ex_af_af()
+    asm.ld_mem_de_a()
+    asm.and_n(0x0F)
+    asm.or_n(0x70)
+    asm.inc_de()
+    asm.ld_mem_de_a()
+    asm.ret()
+
+    # LDA (zp,X) ($A1) - Pre-indexed indirect
+    # Address at (ZP + X) -> A
+    asm.label('H_LDA_INDX')
+    asm.pop_hl()             # L = zp addr
+    # Add X to ZP address (wraps within page)
+    asm.ld_a_l()
+    asm.add_a_b()            # A = zp + X
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    # Read 16-bit address from ZP+X
+    asm.ld_e_mem_hl()
+    asm.inc_l()              # Wraps within ZP
+    asm.ld_d_mem_hl()
+    # DE = target address, inline READ_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()
+    asm.ld_a_mem_de()
+    asm.or_a()
+    asm.ret()
+
+    # STA (zp,X) ($81) - Pre-indexed indirect
+    asm.label('H_STA_INDX')
+    asm.ex_af_af()           # Save 6502 A
+    asm.pop_hl()             # L = zp addr
+    # Add X
+    asm.ld_a_l()
+    asm.add_a_b()
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    # Read address
+    asm.ld_e_mem_hl()
+    asm.inc_l()
+    asm.ld_d_mem_hl()
+    # Inline WRITE_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()
+    asm.ex_af_af()
+    asm.ld_mem_de_a()
+    asm.and_n(0x0F)
+    asm.or_n(0x70)
+    asm.inc_de()
+    asm.ld_mem_de_a()
+    asm.ret()
+
     # STX zp ($86)
     asm.label('H_STX_ZP')
     asm.pop_hl()
@@ -674,12 +904,40 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ex_af_af()
     asm.ret()
 
+    # STX zp,Y ($96)
+    asm.label('H_STX_ZPY')
+    asm.pop_hl()             # L = zp base
+    asm.ex_af_af()
+    asm.ld_a_l()
+    asm.add_a_c()            # A = zp + Y
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    asm.ld_mem_hl_b()        # Store X
+    asm.xor_a()
+    asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
+    asm.ex_af_af()
+    asm.ret()
+
     # STY zp ($84)
     asm.label('H_STY_ZP')
     asm.pop_hl()
     asm.ld_h_n(ZP_LINEAR_BASE >> 8)
     asm.ld_mem_hl_c()        # store Y
     asm.ex_af_af()
+    asm.xor_a()
+    asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
+    asm.ex_af_af()
+    asm.ret()
+
+    # STY zp,X ($94)
+    asm.label('H_STY_ZPX')
+    asm.pop_hl()             # L = zp base
+    asm.ex_af_af()
+    asm.ld_a_l()
+    asm.add_a_b()            # A = zp + X
+    asm.ld_l_a()
+    asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    asm.ld_mem_hl_c()        # Store Y
     asm.xor_a()
     asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
     asm.ex_af_af()
@@ -926,8 +1184,29 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.cp_n(0xFC)
     asm.jr_nc_label('_jsr_trap')
 
-    # Normal JSR - for now just jump (no return stack yet)
+    # Normal JSR - push return addr to shadow stack, then jump
     asm.label('_jsr_do')
+    # Step 1: Save target address (DE) temporarily
+    # Use $8F10 (outside shadow stack area $8E00-$8EFF)
+    asm.ld_mem_nn_de(0x8F10)  # TEMP_ADDR = DE (target)
+
+    # Step 2: Get current SP (this is our return address!)
+    asm.ld_hl_nn(0)
+    asm.add_hl_sp()          # HL = SP = return addr
+
+    # Step 3: Push return addr to shadow stack
+    asm.ld_de_mem_nn(SHADOW_STACK_PTR)  # DE = shadow ptr
+    asm.dec_de()
+    asm.dec_de()             # Make room for 2 bytes
+    asm.ld_mem_nn_de(SHADOW_STACK_PTR)  # Update shadow ptr
+    # Store return addr (HL) at shadow stack (DE)
+    asm.ex_de_hl()           # HL = shadow ptr, DE = return addr
+    asm.ld_mem_hl_e()        # low byte
+    asm.inc_hl()
+    asm.ld_mem_hl_d()        # high byte
+
+    # Step 4: Restore target and convert to Z80 address
+    asm.ld_de_mem_nn(0x8F10) # DE = target 6502 addr
     # Inline ADDR_TO_Z80
     asm.ld_a_d()
     asm.and_n(0xE0)
@@ -938,9 +1217,11 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.rla()
     asm.or_n(0xC0)
     asm.ld_d_a()             # DE = Z80 addr
+
+    # Step 5: Jump to target
     asm.ex_de_hl()
-    asm.ld_sp_hl()           # SP = target (for threading)
-    asm.ex_af_af()           # Restore 6502 A before next instruction
+    asm.ld_sp_hl()           # SP = target
+    asm.ex_af_af()           # Restore 6502 A
     asm.ret()                # Start executing at target
 
     asm.label('_jsr_trap')
@@ -962,9 +1243,18 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # RTS ($60)
     asm.label('H_RTS')
-    # Pop return from shadow stack
-    # TODO: implement shadow stack
-    asm.halt()               # placeholder
+    # Pop return address from shadow stack
+    asm.ld_hl_mem_nn(SHADOW_STACK_PTR)  # HL = shadow ptr
+    # Read return addr from (HL)
+    asm.ld_e_mem_hl()        # E = low byte
+    asm.inc_hl()
+    asm.ld_d_mem_hl()        # D = high byte, DE = return addr
+    asm.inc_hl()
+    asm.ld_mem_nn_hl(SHADOW_STACK_PTR)  # Update shadow ptr (popped 2 bytes)
+    # Set SP = return address and continue
+    asm.ex_de_hl()           # HL = return addr
+    asm.ld_sp_hl()           # SP = return addr
+    asm.ret()                # Continue execution
 
     # ===== FLAG INSTRUCTIONS =====
 
@@ -1080,8 +1370,16 @@ OPCODE_HANDLERS = {
     0x86: 'H_STX_ZP',
     0x88: 'H_DEY',
     0x8A: 'H_TXA',
+    0x81: 'H_STA_INDX',
     0x8D: 'H_STA_ABS',
+    0x91: 'H_STA_INDY',
+    0x94: 'H_STY_ZPX',
+    0x95: 'H_STA_ZPX',
+    0x96: 'H_STX_ZPY',
+    0x99: 'H_STA_ABSY',
+    0x9D: 'H_STA_ABSX',
     0x90: 'H_BCC',
+    0xA1: 'H_LDA_INDX',
     0x98: 'H_TYA',
     0xA0: 'H_LDY_IMM',
     0xA2: 'H_LDX_IMM',
@@ -1091,7 +1389,12 @@ OPCODE_HANDLERS = {
     0xAA: 'H_TAX',
     0xAD: 'H_LDA_ABS',
     0xB0: 'H_BCS',
+    0xB1: 'H_LDA_INDY',
+    0xB4: 'H_LDY_ZPX',
     0xB5: 'H_LDA_ZPX',
+    0xB6: 'H_LDX_ZPY',
+    0xB9: 'H_LDA_ABSY',
+    0xBD: 'H_LDA_ABSX',
     0xB8: 'H_CLV',
     0xC0: 'H_CPY_IMM',
     0xC6: 'H_DEC_ZP',
