@@ -539,5 +539,99 @@ done:   BRK
 
 ---
 
+## Session Log: December 12, 2025 (Session 4)
+
+### Inline Data Works!
+
+Discovered that data embedded in code stream works correctly because RET-threading preserves original bytes:
+
+```
+Original:     $48 ('H')
+Threaded:     [$48, $74]
+                ↑
+           LDA abs,X reads this byte correctly!
+```
+
+**Why it works:**
+- Each 6502 byte becomes 2-byte handler address: `[byte, 0x70|(byte&0x0F)]`
+- READ_6502 doubles the address: `Z80_addr = $C000 + (6502_addr × 2)`
+- At doubled address, the LOW byte is the original data!
+
+### Simplified Architecture
+
+Removed `.6502` packed format - no longer needed! Simple `.bin` files work:
+
+```
+run_6502.py                 # Unified runner
+├── HELLO_WORLD_6502        # Built-in (65 bytes)
+├── ECHO_6502               # Built-in (34 bytes)
+├── COUNTER_6502            # Built-in (~20 bytes)
+└── HELLO_NAME_6502         # Built-in (115 bytes, inline strings!)
+```
+
+### Hello Name Program
+
+Complete interactive program with inline strings:
+
+```
+$ python3 run_6502.py -n
+6502 Hello Name Program
+Enter your name and press Enter
+----------------------------------------
+What is your name? Alice
+Hello, Alice!
+----------------------------------------
+Done.
+```
+
+**Code structure:**
+```asm
+        ORG $0800
+        ; Code section (~75 bytes)
+        LDX #0
+print:  LDA prompt,X    ; Uses LDA abs,X
+        BEQ read_name
+        JSR COUT
+        ...
+        ; Data section (inline, right after BRK)
+prompt: .byte "What is your name? ",0
+hello:  .byte "Hello, ",0
+```
+
+### Fixes Applied
+
+1. **LF → CR+LF in output**: Raw terminal mode needs both for proper newlines
+   ```python
+   def _on_output(self, ch):
+       if ch == '\n':
+           print('\r\n', end='', flush=True)
+       else:
+           print(ch, end='', flush=True)
+   ```
+
+2. **Accept both CR and LF as input terminators**: Works with both Unix and DOS line endings
+
+### Files Cleaned Up
+
+- Removed: `*.6502` files (obsolete packed format)
+- Removed: `pack_6502_binary()`, `unpack_6502_binary()`
+- Removed: `HELLO_NAME_STRINGS` (no longer needed)
+- Updated: `hello_name.bin`, `echo.bin`
+
+### Memory Model Summary
+
+```
+6502 Address    Z80 Location        Access Method
+─────────────────────────────────────────────────────
+$0000-$00FF     $8000-$80FF         Direct (ZP_LINEAR_BASE)
+$0100-$01FF     $8100-$81FF         Direct (Stack)
+$0200-$03FF     $8200-$83FF         Direct (Buffers)
+$0800+          Bank 0 @ $C000+     READ_6502 (×2 offset)
+```
+
+**Key insight:** Data in code area is readable via `LDA abs,X` because threading preserves original bytes in low position of each 2-byte pair.
+
+---
+
 *Last updated: 2025-12-12*
-*Current phase: Phase 3 - Echo Program Working!*
+*Current phase: Phase 3 - Hello Name Complete!*
