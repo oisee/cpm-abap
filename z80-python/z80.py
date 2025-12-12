@@ -677,6 +677,18 @@ class Z80:
             else:
                 cycles = 7
 
+        # DJNZ e
+        elif opcode == 0x10:
+            offset = self.fetch8()
+            if offset >= 128:
+                offset -= 256
+            self.b = (self.b - 1) & 0xFF
+            if self.b != 0:
+                self.pc = (self.pc + offset) & 0xFFFF
+                cycles = 13
+            else:
+                cycles = 8
+
         # CALL nn
         elif opcode == 0xCD:
             addr = self.fetch16()
