@@ -260,6 +260,7 @@ class Z80Asm:
     def ld_de_nn(self, nn): self.emit(0x11); self.dw(nn)
     def ld_hl_nn(self, nn): self.emit(0x21); self.dw(nn)
     def ld_sp_nn(self, nn): self.emit(0x31); self.dw(nn)
+    def ld_sp_hl(self):     self.emit(0xF9)
 
     def ld_mem_nn_a(self, nn):  self.emit(0x32); self.dw(nn)
     def ld_a_mem_nn(self, nn):  self.emit(0x3A); self.dw(nn)
@@ -580,12 +581,23 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # LDA abs ($AD)
     asm.label('H_LDA_ABS')
-    asm.ex_af_af()           # save 6502 A
-    asm.call_label('GET_OPERAND_WORD')  # DE = addr
-    asm.call_label('READ_6502')         # A = value
+    # Inline operand extraction (can't use CALL - corrupts threading stack!)
+    asm.pop_hl()             # HL = first word (low byte = addr_lo)
+    asm.pop_de()             # DE = second word (low byte = addr_hi)
+    asm.ld_d_e()             # D = addr_hi
+    asm.ld_e_l()             # E = addr_lo, DE = 6502 address
+    # Inline READ_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)        # bank select
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()             # DE = Z80 addr
+    asm.ld_a_mem_de()        # A = value
     asm.or_a()               # set flags
-    asm.ex_af_af()           # A' = value with flags
-    asm.ex_af_af()           # A = value (this is our 6502 A now)
     asm.ret()
 
     # LDX #imm ($A2)
@@ -627,10 +639,28 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # STA abs ($8D)
     asm.label('H_STA_ABS')
-    asm.ex_af_af()           # save 6502 A
-    asm.call_label('GET_OPERAND_WORD')  # DE = addr
+    asm.ex_af_af()           # save 6502 A to A'
+    # Inline operand extraction
+    asm.pop_hl()             # HL = first word (low byte = addr_lo)
+    asm.pop_de()             # DE = second word (low byte = addr_hi)
+    asm.ld_d_e()             # D = addr_hi
+    asm.ld_e_l()             # E = addr_lo, DE = 6502 address
+    # Inline WRITE_6502
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)        # bank select
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()             # DE = Z80 addr
     asm.ex_af_af()           # A = value to store
-    asm.call_label('WRITE_6502')
+    asm.ld_mem_de_a()        # write low byte
+    asm.and_n(0x0F)
+    asm.or_n(0x70)
+    asm.inc_de()
+    asm.ld_mem_de_a()        # write high byte (handler)
     asm.ret()
 
     # STX zp ($86)
@@ -860,104 +890,75 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # JMP abs ($4C)
     asm.label('H_JMP_ABS')
-    asm.call_label('GET_OPERAND_WORD')  # DE = target
-    # Check for ZP/Stack
+    # Inline operand extraction
+    asm.pop_hl()             # HL = first word (low byte = addr_lo)
+    asm.pop_de()             # DE = second word (low byte = addr_hi)
+    asm.ld_d_e()             # D = addr_hi
+    asm.ld_e_l()             # E = addr_lo, DE = 6502 address
+    # For simplicity, skip ZP/Stack check for now
+    # Inline ADDR_TO_Z80
     asm.ld_a_d()
-    asm.or_a()
-    asm.jr_z_label('_jmp_zp')
-    asm.cp_n(0x01)
-    asm.jr_z_label('_jmp_stack')
-    # Normal jump
-    asm.label('_jmp_normal')
-    asm.call_label('ADDR_TO_Z80')
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)        # bank select
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()             # DE = Z80 addr
+    # Set SP to new address and RET to start execution
     asm.ex_de_hl()
-    asm.jp_hl()
-
-    asm.label('_jmp_zp')
-    asm.ex_af_af()
-    asm.ld_a_mem_nn(ZP_SYNCED_ADDR)
-    asm.or_a()
-    asm.jr_nz_label('_jmp_zp_ok')
-    asm.call_label('SYNC_ZP')
-    asm.ld_a_n(1)
-    asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
-    asm.label('_jmp_zp_ok')
-    asm.ex_af_af()
-    asm.jr_label('_jmp_normal')
-
-    asm.label('_jmp_stack')
-    asm.ex_af_af()
-    asm.ld_a_mem_nn(STACK_SYNCED_ADDR)
-    asm.or_a()
-    asm.jr_nz_label('_jmp_stack_ok')
-    asm.call_label('SYNC_STACK')
-    asm.ld_a_n(1)
-    asm.ld_mem_nn_a(STACK_SYNCED_ADDR)
-    asm.label('_jmp_stack_ok')
-    asm.ex_af_af()
-    asm.jr_label('_jmp_normal')
+    asm.ld_sp_hl()           # SP = target addr
+    asm.ret()                # RET will pop next handler
 
     # JSR abs ($20)
     asm.label('H_JSR')
-    asm.call_label('GET_OPERAND_WORD')  # DE = target
+    asm.ex_af_af()           # Save 6502 A to A' !!!
+
+    # Inline operand extraction
+    asm.pop_hl()             # HL = first word (low byte = addr_lo)
+    asm.pop_de()             # DE = second word (low byte = addr_hi)
+    asm.ld_d_e()             # D = addr_hi
+    asm.ld_e_l()             # E = addr_lo, DE = 6502 target address
 
     # Check for ROM trap ($FC00+)
     asm.ld_a_d()
     asm.cp_n(0xFC)
     asm.jr_nc_label('_jsr_trap')
 
-    # Check for ZP/Stack
-    asm.or_a()
-    asm.jr_z_label('_jsr_zp')
-    asm.cp_n(0x01)
-    asm.jr_z_label('_jsr_stack')
-
-    # Normal JSR - push return to shadow stack
+    # Normal JSR - for now just jump (no return stack yet)
     asm.label('_jsr_do')
-    # TODO: push return address to shadow stack
-    asm.call_label('ADDR_TO_Z80')
+    # Inline ADDR_TO_Z80
+    asm.ld_a_d()
+    asm.and_n(0xE0)
+    asm.out_n_a(0x00)        # bank select
+    asm.ld_a_d()
+    asm.and_n(0x1F)
+    asm.sla_e()
+    asm.rla()
+    asm.or_n(0xC0)
+    asm.ld_d_a()             # DE = Z80 addr
     asm.ex_de_hl()
-    asm.jp_hl()
+    asm.ld_sp_hl()           # SP = target (for threading)
+    asm.ex_af_af()           # Restore 6502 A before next instruction
+    asm.ret()                # Start executing at target
 
     asm.label('_jsr_trap')
-    # Look up trap handler
-    # Trap table at $8C00, indexed by (addr & $03FF)
+    # Look up trap handler in table at $8C00
+    # Index by (addr & $03FF)
     asm.ld_h_n(0x8C)
     asm.ld_a_d()
     asm.and_n(0x03)
     asm.or_n(0x8C)
     asm.ld_h_a()
-    asm.ld_l_e()
+    asm.ld_l_e()             # HL = $8Cxx or $8Dxx etc.
     # Read trap handler address
     asm.ld_e_mem_hl()
     asm.inc_hl()
-    asm.ld_d_mem_hl()
+    asm.ld_d_mem_hl()        # DE = trap handler addr
     asm.ex_de_hl()
-    asm.jp_hl()
-
-    asm.label('_jsr_zp')
-    asm.ex_af_af()
-    asm.ld_a_mem_nn(ZP_SYNCED_ADDR)
-    asm.or_a()
-    asm.jr_nz_label('_jsr_zp_ok')
-    asm.call_label('SYNC_ZP')
-    asm.ld_a_n(1)
-    asm.ld_mem_nn_a(ZP_SYNCED_ADDR)
-    asm.label('_jsr_zp_ok')
-    asm.ex_af_af()
-    asm.jr_label('_jsr_do')
-
-    asm.label('_jsr_stack')
-    asm.ex_af_af()
-    asm.ld_a_mem_nn(STACK_SYNCED_ADDR)
-    asm.or_a()
-    asm.jr_nz_label('_jsr_stack_ok')
-    asm.call_label('SYNC_STACK')
-    asm.ld_a_n(1)
-    asm.ld_mem_nn_a(STACK_SYNCED_ADDR)
-    asm.label('_jsr_stack_ok')
-    asm.ex_af_af()
-    asm.jr_label('_jsr_do')
+    asm.ex_af_af()           # Restore 6502 A before trap call !!!
+    asm.jp_hl()              # Jump to trap handler (will RET back to threading)
 
     # RTS ($60)
     asm.label('H_RTS')
