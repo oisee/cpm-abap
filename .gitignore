@@ -30,7 +30,3 @@ credentials*.json
 
 # Windows metadata
 *:Zone.Identifier
-
-# Copyrighted game files (Infocom)
-ZORK1.COM
-ZORK1.DAT
