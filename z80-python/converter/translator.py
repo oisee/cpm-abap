@@ -2,13 +2,24 @@
 6502 to Threaded Code Translator
 
 Converts 6502 binary code into Z80 threaded code format.
-Each 6502 instruction becomes:
-  - 2 bytes: handler address
-  - 0, 2, or 4 bytes: operand (depending on addressing mode)
+
+IMPORTANT: Every byte becomes a handler address!
+This allows jumping to any byte in the original code.
+
+For opcode $A9 (LDA #imm) followed by operand $48:
+  - $A9 → handler $79A9 (LDA# handler)
+  - $48 → handler $7848 (PHA handler, but only low byte used as operand)
+
+The LDA# handler does:
+  POP BC       ; Gets next handler address ($7848)
+  LD A, C      ; A = low byte = $48 (the immediate value!)
+  RET          ; Continue to next-next handler
 
 Output format:
-  For each instruction:
-    [handler_lo] [handler_hi] [operand_lo] [operand_hi]?
+  For EVERY byte in input:
+    [handler_lo] [handler_hi]
+
+Expansion ratio: exactly 2x (each byte → 2 bytes)
 """
 
 from dataclasses import dataclass
@@ -41,22 +52,25 @@ class Translator:
         """
         Translate entire 6502 binary to threaded code.
 
+        EVERY byte becomes a handler address (2 bytes).
+        Expansion ratio is exactly 2x.
+
         Args:
             binary: Raw 6502 machine code
             org: Origin address (where code is loaded in 6502 memory)
 
         Returns:
-            Threaded code bytes
+            Threaded code bytes (len = 2 * len(binary))
         """
         self.org = org
         self.warnings = []
         output = bytearray()
-        pc = 0
 
-        while pc < len(binary):
-            instr = self.translate_instruction(binary, pc, org + pc)
-            output.extend(instr.output_bytes)
-            pc += ADDR_MODE_BYTES.get(instr.mode, 1)
+        # Every single byte becomes a handler address
+        for byte in binary:
+            handler = opcode_to_handler(byte)
+            output.append(handler & 0xFF)
+            output.append((handler >> 8) & 0xFF)
 
         return bytes(output)
 
