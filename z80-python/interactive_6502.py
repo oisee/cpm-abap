@@ -26,12 +26,21 @@ class Emu6502:
         for i, b in enumerate(RUNTIME_CODE):
             self.bus.fixed_memory[RUNTIME_ORG + i] = b
 
-        # Trap table
+        # Trap table - fill with UNIMPL first
         for i in range(1024):
             self.bus.fixed_memory[0x8C00 + i] = 0x50 if i % 2 == 0 else 0x60
-        offset = 0xFDED & 0x3FF
-        self.bus.fixed_memory[0x8C00 + offset] = LABELS['TRAP_COUT'] & 0xFF
-        self.bus.fixed_memory[0x8C00 + offset + 1] = LABELS['TRAP_COUT'] >> 8
+
+        # Set up key traps
+        traps = {
+            0xFDED: LABELS['TRAP_COUT'],    # COUT - character output
+            0xFD0C: LABELS['TRAP_RDKEY'],   # RDKEY - read key
+            0xFD6A: LABELS['TRAP_GETLN'],   # GETLN - get line
+            0xFC58: LABELS['TRAP_HOME'],    # HOME - clear screen
+        }
+        for rom_addr, handler in traps.items():
+            offset = rom_addr & 0x3FF
+            self.bus.fixed_memory[0x8C00 + offset] = handler & 0xFF
+            self.bus.fixed_memory[0x8C00 + offset + 1] = handler >> 8
 
         # Init state
         self.bus.fixed_memory[0x8F00] = 0
