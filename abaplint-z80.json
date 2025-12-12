@@ -1,6 +1,6 @@
 {
   "global": {
-    "files": "/src-cpu/**/*.*",
+    "files": "/src/**/zcl_cpu_z80*.abap,/src/**/zif_cpu_z80*.abap",
     "skipGeneratedFunctionGroups": true
   },
   "dependencies": [

@@ -83,6 +83,32 @@ mcp__a4h-abap-adt__Activate(object_url="...", object_name="...")
 3. Run program in SAP GUI (SE38 or transaction)
 4. Verify behavior
 
+### ABAP Naming Conventions
+
+| Prefix | Usage | Example |
+|--------|-------|---------|
+| `ts_` | Structure types | `ts_game_info` |
+| `tt_` | Table types | `tt_game_list` |
+| `tv_` | Simple variable types | `tv_name` |
+| `lv_` | Local variables | `lv_count` |
+| `lt_` | Local tables | `lt_lines` |
+| `ls_` | Local structures | `ls_game` |
+| `gv_` | Global variables | `gv_input` |
+| `gt_` | Global tables | `gt_commands` |
+| `gs_` | Global structures | `gs_status` |
+| `mv_` | Instance attributes | `mv_running` |
+| `mt_` | Instance table attributes | `mt_lines` |
+| `ms_` | Instance structure attributes | `ms_config` |
+| `mo_` | Instance object references | `mo_zmachine` |
+| `iv_` | Importing parameters | `iv_story` |
+| `ev_` | Exporting parameters | `ev_text` |
+| `cv_` | Changing parameters | `cv_output` |
+| `rv_` | Returning value | `rv_result` |
+| `c_` | Constants | `c_max_lines` |
+| `gc_` | Global constants | `gc_version` |
+
+**IMPORTANT**: Use `ts_` for structures, NOT `ty_`!
+
 ---
 
 ## Paused: Z80/i8080 Emulator
@@ -118,5 +144,5 @@ npm test    # Transpile + run tests locally
 
 ---
 
-*Last updated: 2025-12-08*
+*Last updated: 2025-12-09*
 *Current focus: Z-Machine (ZORK) via MCP-ADT*

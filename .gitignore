@@ -1,6 +1,10 @@
 # RunCPM reference implementation
 RunCPM/
 
+# Reference implementations (cloned repos)
+reference-zmachine-go/
+reference-zmachine-py/
+
 # Node.js / Transpiler
 node_modules/
 output/
@@ -9,4 +13,24 @@ output/
 
 # npm
 package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Credentials / secrets
 .mcp*.json
+.env
+.env.*
+credentials*.json
+*.pem
+*.key
+
+# Windows metadata
+*:Zone.Identifier
+
+# Copyrighted game files (Infocom)
+ZORK1.COM
+ZORK1.DAT

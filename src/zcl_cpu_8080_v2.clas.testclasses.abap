@@ -2,7 +2,10 @@
 *& Unit Test Class for Z80/i8080 CPU Emulator
 *& Compatible with abaplint transpiler
 *&---------------------------------------------------------------------*
-CLASS zcl_cpu_8080_test DEFINITION
+CLASS ltcl_cpu_8080_test DEFINITION DEFERRED.
+CLASS zcl_cpu_8080_v2 DEFINITION LOCAL FRIENDS ltcl_cpu_8080_test.
+
+CLASS ltcl_cpu_8080_test DEFINITION
   FOR TESTING
   RISK LEVEL HARMLESS
   DURATION SHORT
@@ -12,7 +15,7 @@ CLASS zcl_cpu_8080_test DEFINITION
     DATA: mo_cpu TYPE REF TO zcl_cpu_8080_v2.
 
     METHODS:
-      setup FOR TESTING,
+      setup,
       test_init FOR TESTING,
       test_memory FOR TESTING,
       test_nop FOR TESTING,
@@ -32,7 +35,7 @@ CLASS zcl_cpu_8080_test DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_cpu_8080_test IMPLEMENTATION.
+CLASS ltcl_cpu_8080_test IMPLEMENTATION.
 
   METHOD setup.
     CREATE OBJECT mo_cpu.
