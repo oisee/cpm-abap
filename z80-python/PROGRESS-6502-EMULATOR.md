@@ -367,5 +367,41 @@ Typical 6502 code: 70% ZP, 30% ABS
 
 ---
 
+---
+
+## Session Log: December 12, 2025
+
+### First Successful Test!
+
+**Test Program**: Print "HI\n" using LDA and JSR COUT
+
+```asm
+; 6502 code (16 bytes)
+LDA #$48        ; 'H'
+JSR $FDED       ; COUT
+LDA #$49        ; 'I'
+JSR $FDED       ; COUT
+LDA #$0A        ; newline
+JSR $FDED       ; COUT
+BRK
+```
+
+**Result**: ✓ Output "HI\n" correctly in 86 Z80 cycles
+
+### Key Bugs Fixed
+
+1. **CALL corrupts threading stack** - Inlined all helper routines
+2. **A register clobbered in JSR** - Added EX AF,AF' save/restore
+3. **Trap table odd alignment** - Fixed fill order
+
+### Files Created
+
+- `gen_z80_runtime.py` - Z80 code generator
+- `test_6502_runtime.py` - Test harness
+- `runtime_6502_data.py` - Generated runtime module
+- `REPORT-6502-Z80-EMULATOR.md` - Detailed technical report
+
+---
+
 *Last updated: 2025-12-12*
-*Current phase: Phase 3 Design Complete*
+*Current phase: Phase 3 - First Test PASSED*
