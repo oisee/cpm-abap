@@ -331,6 +331,26 @@ class Z80Asm:
         self.emit(0xFA, 0x00, 0x00)
         self.fixups.append((len(self.code) - 2, label, 'abs'))
 
+    def jp_z_label(self, label: str):
+        """JP Z, nn - Jump if zero (zero flag set)"""
+        self.emit(0xCA, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
+    def jp_nz_label(self, label: str):
+        """JP NZ, nn - Jump if not zero (zero flag clear)"""
+        self.emit(0xC2, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
+    def jp_c_label(self, label: str):
+        """JP C, nn - Jump if carry (carry flag set)"""
+        self.emit(0xDA, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
+    def jp_nc_label(self, label: str):
+        """JP NC, nn - Jump if no carry (carry flag clear)"""
+        self.emit(0xD2, 0x00, 0x00)
+        self.fixups.append((len(self.code) - 2, label, 'abs'))
+
     def call_label(self, label: str):
         self.emit(0xCD, 0x00, 0x00)
         self.fixups.append((len(self.code) - 2, label, 'abs'))
@@ -368,9 +388,12 @@ def generate_runtime() -> Z80Asm:
 
     # ----- READ_6502: DE = 6502 addr -> A = value -----
     asm.label('READ_6502')
-    # Bank select (upper 3 bits direct to port)
+    # Bank select: bank = high_byte >> 5 (gives 0-7 for 8 banks)
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()               # Rotate left 3 times to get bank 0-7
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(BANK_PORT)
     # Address calc
     asm.ld_a_d()
@@ -386,9 +409,12 @@ def generate_runtime() -> Z80Asm:
     # ----- WRITE_6502: A = value, DE = 6502 addr -----
     asm.label('WRITE_6502')
     asm.ex_af_af()           # save value to A'
-    # Bank select
+    # Bank select: bank = high_byte >> 5
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(BANK_PORT)
     # Address calc
     asm.ld_a_d()
@@ -452,6 +478,9 @@ def generate_runtime() -> Z80Asm:
     asm.label('ADDR_TO_Z80')
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(BANK_PORT)
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -524,6 +553,10 @@ def generate_hle_traps() -> Z80Asm:
     asm.ld_a_n(ord('?'))
     asm.out_n_a(0x01)
     asm.halt()
+
+    # ----- TRAP_STUB: Stub for ROM routines we don't need -----
+    asm.label('TRAP_STUB')
+    asm.ret()
 
     return asm
 
@@ -625,6 +658,9 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.label('_lda_abs_read')
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)        # bank select
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -726,6 +762,9 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.label('_sta_abs_write')
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)        # bank select
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -793,6 +832,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # Now DE = final 6502 address, inline READ_6502
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -823,6 +865,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # Inline WRITE_6502
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -854,6 +899,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # DE = target address, inline READ_6502
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -881,6 +929,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # Inline WRITE_6502
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -970,6 +1021,19 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.label('H_TYA')
     asm.ld_a_c()             # A = Y
     asm.or_a()
+    asm.ret()
+
+    # TXS ($9A) - Transfer X to Stack Pointer (no flags)
+    asm.label('H_TXS')
+    asm.ld_a_b()             # A = X
+    asm.ld_mem_nn_a(REG_S_ADDR)  # S = A
+    asm.ret()
+
+    # TSX ($BA) - Transfer Stack Pointer to X (updates N,Z)
+    asm.label('H_TSX')
+    asm.ld_a_mem_nn(REG_S_ADDR)  # A = S
+    asm.ld_b_a()             # X = A
+    asm.or_a()               # Update N,Z flags
     asm.ret()
 
     # ===== INCREMENT/DECREMENT =====
@@ -1171,6 +1235,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # Inline ADDR_TO_Z80
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)        # bank select
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -1193,10 +1260,44 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_e()             # D = addr_hi
     asm.ld_e_l()             # E = addr_lo, DE = 6502 target address
 
-    # Check for ROM trap ($FC00+)
+    # Check for ROM trap ($FC00+ uses trap table)
     asm.ld_a_d()
     asm.cp_n(0xFC)
     asm.jr_nc_label('_jsr_trap')
+
+    # Check for specific ROM routines in $F800-$FBFF range
+    asm.cp_n(0xF8)
+    asm.jr_c_label('_jsr_do')    # Below $F800, normal JSR
+
+    # D is $F8, $F9, $FA, or $FB - check for known addresses
+    asm.cp_n(0xFB)
+    asm.jr_nz_label('_check_f8')
+
+    # D=$FB, check E for specific addresses
+    asm.ld_a_e()
+    asm.cp_n(0xFD)               # $FBFD = VIDOUT
+    asm.jp_z_label('TRAP_COUT')  # VIDOUT is same as COUT
+    asm.cp_n(0xC1)               # $FBC1 = BASCALC
+    asm.jp_z_label('TRAP_STUB')  # Just return, we don't need it
+    asm.jr_label('_jsr_do')      # Unknown $FBxx, normal JSR
+
+    asm.label('_check_f8')
+    asm.cp_n(0xF8)
+    asm.jr_nz_label('_check_f6')   # Not $F8xx, check $F6xx
+
+    asm.ld_a_e()
+    asm.cp_n(0x01)               # $F801 = PLOT
+    asm.jp_z_label('TRAP_STUB')  # Just return for graphics
+    asm.jr_label('_jsr_do')      # Unknown $F8xx, normal JSR
+
+    asm.label('_check_f6')
+    asm.cp_n(0xF6)
+    asm.jr_nz_label('_jsr_do')   # Not $F6xx, normal JSR
+
+    asm.ld_a_e()
+    asm.cp_n(0xF0)               # $F6F0 = unknown ROM routine
+    asm.jp_z_label('TRAP_STUB')  # Just return
+    # Fall through to normal JSR for unknown $F6xx
 
     # Normal JSR - push return addr to shadow stack, then jump
     asm.label('_jsr_do')
@@ -1224,6 +1325,9 @@ def generate_opcode_handlers() -> Z80Asm:
     # Inline ADDR_TO_Z80
     asm.ld_a_d()
     asm.and_n(0xE0)
+    asm.rlca()
+    asm.rlca()
+    asm.rlca()
     asm.out_n_a(0x00)        # bank select
     asm.ld_a_d()
     asm.and_n(0x1F)
@@ -1409,6 +1513,8 @@ OPCODE_HANDLERS = {
     0xB6: 'H_LDX_ZPY',
     0xB9: 'H_LDA_ABSY',
     0xBD: 'H_LDA_ABSX',
+    0x9A: 'H_TXS',
+    0xBA: 'H_TSX',
     0xB8: 'H_CLV',
     0xC0: 'H_CPY_IMM',
     0xC6: 'H_DEC_ZP',

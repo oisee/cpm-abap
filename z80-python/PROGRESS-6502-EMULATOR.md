@@ -633,5 +633,104 @@ $0800+          Bank 0 @ $C000+     READ_6502 (×2 offset)
 
 ---
 
-*Last updated: 2025-12-12*
-*Current phase: Phase 3 - Hello Name Complete!*
+## Session Log: December 13, 2025 (Session 5)
+
+### Attempting Scott Adams Adventureland
+
+Extracted and attempted to run Scott Adams' "Adventureland" (1978) - a classic text adventure originally written for TRS-80 (which uses Z80!). Ironic: games went Z80 → 6502 (Apple II port) → Z80 (our emulator).
+
+**Binary extracted:**
+- Source: `scottadamstextadventures1-6.dsk` (Apple II DOS 3.3)
+- File: `adventureland.bin` (20,336 bytes)
+- Load address: $0800
+
+### Bug #1: Bank Select Shift
+
+**Symptom:** JSR to $2E3C jumped to wrong address
+
+**Root cause:** Bank select was outputting masked value instead of bank number:
+```python
+# WRONG: A = $20 for address $2xxx
+asm.ld_a_d()
+asm.and_n(0xE0)
+asm.out_n_a(0x00)  # Outputs $20, not bank 1!
+
+# FIXED: Shift right to get bank 0-7
+asm.ld_a_d()
+asm.and_n(0xE0)
+asm.rlca()         # Rotate left 3× = shift right 5
+asm.rlca()
+asm.rlca()
+asm.out_n_a(0x00)  # Outputs 1 for $2xxx
+```
+
+Fixed in 9 locations (READ_6502, WRITE_6502, ADDR_TO_Z80, and inline copies).
+
+### Bug #2: Single-Bank Loading
+
+**Symptom:** JSR to $2E3C returned to $0000 (bank 1 was empty)
+
+**Root cause:** `load_program()` only loaded into bank 0:
+```python
+# WRONG: All code in bank 0
+for i, b in enumerate(threaded):
+    self.bus.banked_memory[0][code_offset + i] = b
+
+# FIXED: Distribute across banks
+for i in range(len(code)):
+    addr_6502 = org + i
+    bank = addr_6502 >> 13           # Bank = addr / 8192
+    offset_in_bank = addr_6502 & 0x1FFF
+    z80_offset = offset_in_bank * 2
+    self.bus.banked_memory[bank][z80_offset] = threaded[i * 2]
+    self.bus.banked_memory[bank][z80_offset + 1] = threaded[i * 2 + 1]
+```
+
+### Bug #3: ROM Traps Below $FC00
+
+**Symptom:** Calls to $FBFD, $FBC1, $F801, $F6F0 not trapped
+
+**Fix:** Added explicit checks in JSR handler for Apple II ROM routines below $FC00:
+```python
+# Check $FC00+ → use trap table
+# Check $F800-$FBFF → explicit address checks:
+#   $FBFD (VIDOUT) → TRAP_COUT
+#   $FBC1 (BASCALC) → TRAP_STUB
+#   $F801 (PLOT) → TRAP_STUB
+#   $F6F0 (unknown) → TRAP_STUB
+```
+
+### Current State
+
+**After fixes:** Execution progresses across banks correctly:
+```
+Step 122: 6502 $083A -> H_JSR
+Step 161: 6502 $2E3D -> H_JMP_ABS  ← Now reaches bank 1!
+Step 201: 6502 $0CB2 -> H_JSR
+...
+*** HALT at step 305: A=$79 ***  ← Missing opcode
+```
+
+**Missing opcodes needed by Adventureland:**
+- $65 ADC zp (304 uses) - most critical
+- $79 ADC abs,Y (50 uses) - caused halt
+- $6D ADC abs (90 uses)
+- $45 EOR zp (149 uses)
+- $6C JMP (ind) (119 uses)
+- And many more (~50 unique valid opcodes)
+
+### Summary
+
+| Issue | Status |
+|-------|--------|
+| Bank select calculation | ✓ Fixed |
+| Multi-bank loading | ✓ Fixed |
+| ROM traps $F800-$FBFF | ✓ Fixed |
+| Missing opcodes (~50) | Pending |
+
+The game now correctly navigates between banks. Next step: implement more 6502 opcodes to run Adventureland fully.
+
+---
+
+*Last updated: 2025-12-13*
+*Current phase: Phase 3 - Multi-bank Execution Working!*

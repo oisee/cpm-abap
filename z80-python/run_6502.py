@@ -370,21 +370,27 @@ class Emu6502Runner:
         threaded = self.convert_to_threaded(code)
         self._log(f"Converted to {len(threaded)} bytes of threaded code")
 
-        # Calculate bank and offset
-        # 6502 address maps to Z80: bank = addr >> 13, offset = (addr & 0x1FFF) * 2
-        # But we use a simpler scheme: all code in bank 0, offset = org * 2
-        code_offset = org * 2
+        # Load threaded code into correct banks
+        # Each bank covers 8KB of 6502 address space (16KB Z80 / 2)
+        # Bank 0: $0000-$1FFF, Bank 1: $2000-$3FFF, etc.
+        for i in range(0, len(code)):
+            addr_6502 = org + i
+            bank = addr_6502 >> 13           # Bank = addr / 8192
+            offset_in_bank = addr_6502 & 0x1FFF  # Offset within 8KB range
+            z80_offset = offset_in_bank * 2  # Threaded code is 2x
 
-        # Load into bank 0
-        for i, b in enumerate(threaded):
-            if code_offset + i < len(self.bus.banked_memory[0]):
-                self.bus.banked_memory[0][code_offset + i] = b
+            # Write the two bytes of threaded code
+            if bank < len(self.bus.banked_memory) and z80_offset + 1 < len(self.bus.banked_memory[bank]):
+                self.bus.banked_memory[bank][z80_offset] = threaded[i * 2]
+                self.bus.banked_memory[bank][z80_offset + 1] = threaded[i * 2 + 1]
 
         # Set up Z80 to start execution
-        # SP points to first instruction in threaded code
-        # Z80 address = $C000 + (6502_addr * 2) but for bank 0 at offset
-        self.start_addr = 0xC000 + code_offset
-        self._log(f"Start address: Z80 ${self.start_addr:04X}")
+        # Start address is in bank (org >> 13), offset (org & 0x1FFF) * 2
+        start_bank = org >> 13
+        start_offset = (org & 0x1FFF) * 2
+        self.start_addr = 0xC000 + start_offset
+        self.start_bank = start_bank
+        self._log(f"Start address: Z80 ${self.start_addr:04X} in bank {start_bank}")
 
     def run(self, max_cycles: int = 1_000_000) -> str:
         """
@@ -399,7 +405,7 @@ class Emu6502Runner:
         # Set up Z80 initial state
         self.cpu.sp = self.start_addr
         self.cpu.pc = 0x8200  # Points to RET instruction to start threading
-        self.bus.current_bank = 0
+        self.bus.current_bank = getattr(self, 'start_bank', 0)
 
         self._log(f"Starting execution: PC=${self.cpu.pc:04X} SP=${self.cpu.sp:04X}")
 
