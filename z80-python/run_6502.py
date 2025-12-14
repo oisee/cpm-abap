@@ -449,24 +449,33 @@ class Emu6502Runner:
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
 
+        import select
+
+        def check_input_ready():
+            """Check if stdin has data available (non-blocking)"""
+            r, _, _ = select.select([fd], [], [], 0)
+            return len(r) > 0
+
         def read_key():
-            """Read single key from terminal (non-blocking style)"""
+            """Read single key from terminal (blocking)"""
             try:
-                ch = sys.stdin.read(1)
+                ch = os.read(fd, 1)
                 if ch:
-                    # Convert Enter to CR for 6502
-                    if ch == '\n':
+                    c = ch[0]
+                    # Convert Enter/LF to CR for 6502
+                    if c == 10 or c == 13:
                         return 0x0D
-                    return ord(ch)
+                    return c
             except:
                 pass
             return 0xFF  # No input
 
         try:
             tty.setraw(fd)
-            tty.setcbreak(fd)
 
+            # Set up input with status checking
             self.bus.on_input = read_key
+            self.bus.check_input_ready = check_input_ready
             self.run(max_cycles=100_000_000)
 
         finally:

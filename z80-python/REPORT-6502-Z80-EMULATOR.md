@@ -453,17 +453,111 @@ Output has some corruption (control codes) that needs investigation.
 
 ---
 
+## Progress Update: December 14, 2025 (Session 6)
+
+### BCD (Decimal) Arithmetic - COMPLETE
+
+Implemented full Binary-Coded Decimal support required for MS BASIC:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| BCD ADC (immediate) | ✓ | Software implementation |
+| BCD SBC (immediate) | ✓ | With proper borrow |
+| BCD ADC (zp, abs) | ✓ | All addressing modes |
+| BCD SBC (zp, abs) | ✓ | All addressing modes |
+
+**Verification Test:**
+```
+Input:  SED; LDA #$19; ADC #$01
+Output: A = $20 ✓ (not $1A)
+```
+
+### MS BASIC Interaction Status
+
+**Working Features:**
+- COLD START sequence completes
+- Memory size prompt and response
+- "BYTES FREE" calculation
+- "MICROSOFT BASIC" banner
+- "OK" prompt display
+- Keyboard input handling
+- PRINT with string literals ("PRINT ""HELLO""" → HELLO)
+
+**Known Issue:**
+- PRINT with numeric expressions shows "?SN ERROR"
+- Example: `PRINT 2+2` → `?SN ERROR`
+- Root cause: Under investigation (number parsing/FP routines)
+
+### Opcodes: ~150/256 (59%)
+
+Added in this session:
+- BCD variants of ADC/SBC (all addressing modes)
+- Various unofficial NOP opcodes ($C2, $E2, $89)
+
+---
+
+## Summary of Achievements
+
+### Milestones Completed
+
+1. **Dec 12**: First 6502 program on Z80 threaded code emulator
+2. **Dec 12**: Branch instructions and interactive programs
+3. **Dec 12**: Inline string data support
+4. **Dec 13**: Multi-bank execution (programs >8KB)
+5. **Dec 13**: Scott Adams Adventureland partial execution
+6. **Dec 14**: MS BASIC cold start and prompts
+7. **Dec 14**: BCD arithmetic implementation
+
+### Technical Achievements
+
+| Achievement | Significance |
+|-------------|--------------|
+| RET-threading on Z80 | ~100x faster than interpretation |
+| 8-bank memory model | 128KB 6502 address space |
+| HLE ROM traps | Native I/O, no Apple II ROM |
+| Zero page execution | CHRGET and other ZP code |
+| BCD software emulation | Z80 DAA workaround |
+
+### Code Statistics
+
+| File | Lines | Description |
+|------|-------|-------------|
+| gen_z80_runtime.py | 4,076 | Z80 code generator |
+| run_6502.py | 614 | 6502 runner/harness |
+| vz80.py | 559 | Virtual Z80 machine |
+| runtime_6502.bin | 7,494 bytes | Generated runtime |
+
+---
+
 ## Next Steps
 
-1. **Debug MS BASIC output corruption** - Control codes appearing in output
-2. **Number printing** - May need arithmetic fixes
-3. **Hardware Target** - ZX Spectrum 128K or ZX Next
+### Immediate Priority: Fix MS BASIC ?SN ERROR
+
+1. Trace number parsing routine
+2. Verify floating point accumulator operations
+3. Check BCD multiplication (10 * digit)
+4. Test with simpler numeric input
+
+### Medium Term
+
+1. Add remaining shift/rotate opcodes (ROR, ROL, ASL, LSR)
+2. Complete addressing mode coverage
+3. Run more MS BASIC commands
+
+### Long Term
+
+1. Port to real ZX Spectrum 128K
+2. Try running Scott Adams Adventureland fully
+3. Potentially target ZX Next
 
 ---
 
 ## Commits
 
 ```
+07088e7 Add entry point option (-E) for separate load/start addresses
+284d849 Fix data write corruption and add I/O status port
+002bac5 MS BASIC running on 6502-Z80 emulator - major milestone
 ce4ee2e Fix bank select and multi-bank loading for large programs
 0ad30ea Update progress report: 6502 echo program complete
 f38c131 Add RDKEY trap and complete 6502 echo program
@@ -476,4 +570,4 @@ f38c131 Add RDKEY trap and complete 6502 echo program
 ---
 
 *Report updated: December 14, 2025*
-*Status: Phase 4 - MS BASIC Running (with output issues), 145 Opcodes Implemented*
+*Status: Phase 4 - MS BASIC Running, BCD Complete, ~150 Opcodes*

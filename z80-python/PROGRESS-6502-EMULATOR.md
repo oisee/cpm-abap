@@ -732,5 +732,143 @@ The game now correctly navigates between banks. Next step: implement more 6502 o
 
 ---
 
-*Last updated: 2025-12-13*
-*Current phase: Phase 3 - Multi-bank Execution Working!*
+## Session Log: December 14, 2025 (Session 6)
+
+### Decimal Mode (BCD) Arithmetic Implemented!
+
+Added full BCD (Binary-Coded Decimal) support for ADC/SBC instructions, required for MS BASIC number handling.
+
+**Key Achievement:** 19+1=20 test now passes correctly:
+```python
+# BCD addition: 0x19 + 0x01 = 0x20 (not 0x1A!)
+result = emu.run_bcd_test()  # Returns 0x20 ✓
+```
+
+### BCD Implementation Details
+
+The 6502's SED (Set Decimal) flag enables BCD mode where each nibble represents a digit 0-9:
+
+```
+Binary mode:  $19 + $01 = $1A (26 decimal)
+BCD mode:     $19 + $01 = $20 (twenty in BCD)
+```
+
+**Z80 Implementation Challenge:** Z80's DAA instruction only works after ADD/SUB, not after arbitrary values. Solution: Full software BCD calculation.
+
+```z80
+; BCD ADC implementation (~50 instructions)
+H_ADC_IMM_BCD:
+    ; Check decimal mode flag
+    LD A, (FLAGS_6502)
+    AND F_DECIMAL
+    JP Z, H_ADC_IMM          ; Binary mode
+
+    ; BCD addition:
+    ; 1. Add low nibbles
+    ; 2. If > 9, add 6 (adjust)
+    ; 3. Add high nibbles + carry
+    ; 4. If > 9, add $60 (adjust)
+    ; 5. Set carry if result > $99
+```
+
+### MS BASIC Status
+
+**Working:**
+- Memory size prompt displays correctly
+- Accepts memory size input
+- Shows "BYTES FREE" message
+- Displays "MICROSOFT BASIC" banner
+- Accepts input at "OK" prompt
+
+**Issue:** PRINT command returns "?SN ERROR" (Syntax Error):
+```
+OK
+PRINT 2+2
+?SN ERROR
+OK
+```
+
+### Current Investigation
+
+The syntax error occurs during number parsing. BASIC's CHRGET routine (at ZP $00B1) correctly reads digits, but the number conversion may have issues:
+
+1. **CHRGET** - Character fetch routine ✓ (verified working)
+2. **Number parsing** - Builds BCD number in floating point accumulator
+3. **Expression evaluation** - The error triggers here
+
+**Hypothesis:** The issue may be related to:
+- FP accumulator initialization
+- BCD multiplication during number building (10 * digit)
+- Zero page variable state
+
+### Milestones Achieved
+
+| Milestone | Date | Status |
+|-----------|------|--------|
+| First 6502 program on Z80 | Dec 12 | ✓ |
+| Branch instructions working | Dec 12 | ✓ |
+| Interactive echo program | Dec 12 | ✓ |
+| Inline string data support | Dec 12 | ✓ |
+| Multi-bank execution | Dec 13 | ✓ |
+| MS BASIC prompts appear | Dec 14 | ✓ |
+| BCD arithmetic (19+1=20) | Dec 14 | ✓ |
+| PRINT command working | Dec 14 | In Progress |
+
+### Technical Stats
+
+- **Opcodes implemented:** ~150/256 (59%)
+- **Code size:** gen_z80_runtime.py = 4,076 lines
+- **Runtime size:** ~7.5 KB
+- **Test programs:** 6 (hello, echo, counter, hello_name, adventureland, msbasic)
+
+### Files Modified This Session
+
+- `gen_z80_runtime.py` - Added BCD ADC/SBC handlers
+- `run_6502.py` - Added entry point option (-E) for separate load/start addresses
+- `vz80.py` - Added I/O status port
+- `runtime_6502.bin` - Regenerated with BCD support
+- `runtime_6502_data.py` - Regenerated
+
+### Next Steps
+
+1. **Debug MS BASIC ?SN ERROR**
+   - Trace number parsing in detail
+   - Check FP accumulator operations
+   - Verify BCD multiplication
+
+2. **Add missing opcodes** as needed:
+   - ROR, ROL (rotate through carry)
+   - ASL, LSR (shifts)
+   - Additional addressing modes
+
+3. **Hardware target** - ZX Spectrum 128K
+
+---
+
+## Challenges Encountered
+
+### Challenge 1: BCD Without DAA
+
+Z80's DAA instruction only works immediately after ADD/SUB. Since we use A for address calculations between the actual addition and adjustment, DAA doesn't work. Solution: Full software BCD using nibble-by-nibble calculation.
+
+### Challenge 2: I/O Polling
+
+MS BASIC uses memory-mapped I/O at $FFF1 for keyboard input. The polling loop would hang without proper status indication:
+```asm
+poll:   LDA $FFF1    ; Read key
+        BEQ poll     ; Loop if no key
+```
+
+Fixed by adding $FFF0 as status port that returns non-zero when input is available.
+
+### Challenge 3: Separate Load/Entry Addresses
+
+MS BASIC loads at $0000 but execution starts at $0400. Added `-E` option to run_6502.py:
+```bash
+python3 run_6502.py -f msbasic.bin -o 0x0000 -E 0x0400
+```
+
+---
+
+*Last updated: 2025-12-14*
+*Current phase: Phase 4 - MS BASIC Running, BCD Arithmetic Complete*

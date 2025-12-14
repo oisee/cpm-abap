@@ -50,6 +50,7 @@ class VZ80Bus(Bus):
         # Callback for real-time I/O (optional)
         self.on_output = None  # Called with character when output occurs
         self.on_input = None   # Called to request input (should return char or None)
+        self.check_input_ready = None  # Called to check if input is available (should return bool)
 
     def read_mem(self, addr: int) -> int:
         """Read byte from memory"""
@@ -104,9 +105,10 @@ class VZ80Bus(Bus):
             # Bit 0 = RDRF (Receive Data Register Full) - input available
             # Bit 1 = TDRE (Transmit Data Register Empty) - output ready (always true)
             status = 0x02  # Output always ready (bit 1)
-            if self.on_input:
-                # Can't peek with callback - assume ready
-                status |= 0x01
+            if self.check_input_ready:
+                # Use callback to check if input is available
+                if self.check_input_ready():
+                    status |= 0x01
             elif self.input_buffer:
                 status |= 0x01  # Input available (bit 0)
             return status

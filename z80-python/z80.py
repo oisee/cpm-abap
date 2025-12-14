@@ -923,6 +923,38 @@ class Z80:
             self.f |= FLAG_H | FLAG_N
             cycles = 4
 
+        # DAA - Decimal Adjust Accumulator
+        elif opcode == 0x27:
+            a = self.a
+            correction = 0
+            carry = False
+
+            if self.get_flag(FLAG_N):
+                # After subtraction
+                if self.get_flag(FLAG_H):
+                    correction |= 0x06
+                if self.get_flag(FLAG_C):
+                    correction |= 0x60
+                    carry = True
+                a = (a - correction) & 0xFF
+            else:
+                # After addition
+                if self.get_flag(FLAG_H) or (a & 0x0F) > 9:
+                    correction |= 0x06
+                if self.get_flag(FLAG_C) or a > 0x99:
+                    correction |= 0x60
+                    carry = True
+                a = (a + correction) & 0xFF
+
+            self.a = a
+            # Update flags: Z, S from result, P/V is parity, H is undefined (we clear it)
+            # C is set if there was a carry, N is preserved
+            flags = self.szp_flags[a] | (FLAG_N if self.get_flag(FLAG_N) else 0)
+            if carry:
+                flags |= FLAG_C
+            self.f = flags
+            cycles = 4
+
         # SCF
         elif opcode == 0x37:
             self.f = (self.f & (FLAG_S | FLAG_Z | FLAG_PV)) | FLAG_C

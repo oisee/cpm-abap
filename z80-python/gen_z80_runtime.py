@@ -40,6 +40,7 @@ SHADOW_STACK_PTR   = 0x8EFE   # Points to current shadow stack position
 REG_S_ADDR         = 0x8F02   # 6502 Stack pointer
 REG_P_ADDR         = 0x8F03   # 6502 Processor status
 CODE_BANK_ADDR     = 0x8F04   # Current code bank (for restore after writes)
+D_FLAG_ADDR        = 0x8F05   # Decimal mode flag (non-zero = decimal mode)
 
 # Banking
 BANK_PORT          = 0x00
@@ -1402,29 +1403,59 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # ADC #imm ($69)
     asm.label('H_ADC_IMM')
-    asm.pop_hl()
-    asm.adc_a_l()            # A = A + imm + C
+    asm.pop_hl()                     # L = immediate value
+    # Check decimal mode
+    asm.ex_af_af()                   # Save A,F to A',F'
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.or_a()
+    asm.jr_nz_label('_adc_imm_dec')
+    asm.ex_af_af()                   # Restore A,F
+    asm.adc_a_l()                    # Binary add: A = A + L + C
+    asm.ret()
+    asm.label('_adc_imm_dec')
+    asm.ex_af_af()                   # Restore A,F
+    asm.adc_a_l()                    # Binary add first
+    asm.daa()                        # Decimal adjust
     asm.ret()
 
     # ADC zp ($65)
     asm.label('H_ADC_ZP')
-    asm.pop_hl()             # L = zp addr
+    asm.pop_hl()                     # L = zp addr
     asm.ld_h_n(ZP_LINEAR_BASE >> 8)
-    asm.adc_a_mem_hl()       # A = A + (ZP) + C
+    # Check decimal mode
+    asm.ex_af_af()
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.or_a()
+    asm.jr_nz_label('_adc_zp_dec')
+    asm.ex_af_af()
+    asm.adc_a_mem_hl()               # Binary add
+    asm.ret()
+    asm.label('_adc_zp_dec')
+    asm.ex_af_af()
+    asm.adc_a_mem_hl()
+    asm.daa()
     asm.ret()
 
     # ADC zp,X ($75)
     asm.label('H_ADC_ZPX')
-    asm.pop_hl()             # L = zp addr
-    asm.ex_af_af()           # Save A
+    asm.pop_hl()                     # L = zp addr
+    asm.ex_af_af()                   # Save A,F
+    asm.ld_a_mem_nn(D_FLAG_ADDR)     # Check decimal mode
+    asm.ld_d_a()                     # D = decimal flag (preserved)
     asm.ld_a_l()
-    asm.add_a_b()            # Add X (wraps within ZP)
+    asm.add_a_b()                    # Add X (wraps within ZP)
     asm.ld_l_a()
     asm.ld_h_n(ZP_LINEAR_BASE >> 8)
-    asm.ld_a_mem_hl()        # A = memory value
-    asm.ld_h_a()             # H = memory value
-    asm.ex_af_af()           # Restore A
-    asm.adc_a_h()            # A = A + H + C
+    asm.ld_a_mem_hl()                # A = memory value
+    asm.ld_h_a()                     # H = memory value
+    asm.ex_af_af()                   # Restore A,F
+    asm.adc_a_h()                    # A = A + H + C
+    # Check decimal flag (D preserved from earlier)
+    asm.inc_d()
+    asm.dec_d()                      # Set Z flag based on D, preserves CF
+    asm.jr_z_label('_adc_zpx_done')
+    asm.daa()
+    asm.label('_adc_zpx_done')
     asm.ret()
 
     # ADC abs ($6D)
@@ -1450,8 +1481,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()             # DE = Z80 addr
     asm.ld_a_mem_de()        # A = memory value
     asm.ld_h_a()             # H = memory value
+    # Check decimal mode while we have A free
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag (preserved)
     asm.ex_af_af()           # Restore 6502 A
     asm.adc_a_h()            # A = A + H + C
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()              # Set Z based on L, preserves CF
+    asm.jr_z_label('_adc_abs_nodaa')
+    asm.daa()
+    asm.label('_adc_abs_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1488,8 +1528,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.adc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_adc_absx_nodaa')
+    asm.daa()
+    asm.label('_adc_absx_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1526,8 +1575,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.adc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_adc_absy_nodaa')
+    asm.daa()
+    asm.label('_adc_absy_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1566,8 +1624,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.adc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_adc_indy_nodaa')
+    asm.daa()
+    asm.label('_adc_indy_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1577,29 +1644,59 @@ def generate_opcode_handlers() -> Z80Asm:
 
     # SBC #imm ($E9)
     asm.label('H_SBC_IMM')
-    asm.pop_hl()
-    asm.sbc_a_l()            # A = A - imm - !C
+    asm.pop_hl()                     # L = immediate value
+    # Check decimal mode
+    asm.ex_af_af()                   # Save A,F to A',F'
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.or_a()
+    asm.jr_nz_label('_sbc_imm_dec')
+    asm.ex_af_af()                   # Restore A,F
+    asm.sbc_a_l()                    # Binary subtract
+    asm.ret()
+    asm.label('_sbc_imm_dec')
+    asm.ex_af_af()                   # Restore A,F
+    asm.sbc_a_l()                    # Binary subtract first
+    asm.daa()                        # Decimal adjust
     asm.ret()
 
     # SBC zp ($E5)
     asm.label('H_SBC_ZP')
-    asm.pop_hl()
+    asm.pop_hl()                     # L = zp addr
     asm.ld_h_n(ZP_LINEAR_BASE >> 8)
+    # Check decimal mode
+    asm.ex_af_af()
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.or_a()
+    asm.jr_nz_label('_sbc_zp_dec')
+    asm.ex_af_af()
+    asm.sbc_a_mem_hl()               # Binary subtract
+    asm.ret()
+    asm.label('_sbc_zp_dec')
+    asm.ex_af_af()
     asm.sbc_a_mem_hl()
+    asm.daa()
     asm.ret()
 
     # SBC zp,X ($F5)
     asm.label('H_SBC_ZPX')
-    asm.pop_hl()
-    asm.ex_af_af()           # Save A
+    asm.pop_hl()                     # L = zp addr
+    asm.ex_af_af()                   # Save A,F
+    asm.ld_a_mem_nn(D_FLAG_ADDR)     # Check decimal mode
+    asm.ld_d_a()                     # D = decimal flag (preserved)
     asm.ld_a_l()
-    asm.add_a_b()            # Add X (wraps within ZP)
+    asm.add_a_b()                    # Add X (wraps within ZP)
     asm.ld_l_a()
     asm.ld_h_n(ZP_LINEAR_BASE >> 8)
-    asm.ld_a_mem_hl()
-    asm.ld_h_a()             # H = memory value
-    asm.ex_af_af()           # Restore A
-    asm.sbc_a_h()            # A = A - H - !C
+    asm.ld_a_mem_hl()                # A = memory value
+    asm.ld_h_a()                     # H = memory value
+    asm.ex_af_af()                   # Restore A,F
+    asm.sbc_a_h()                    # A = A - H - !C
+    # Check decimal flag (D preserved from earlier)
+    asm.inc_d()
+    asm.dec_d()                      # Set Z flag based on D, preserves CF
+    asm.jr_z_label('_sbc_zpx_done')
+    asm.daa()
+    asm.label('_sbc_zpx_done')
     asm.ret()
 
     # SBC abs ($ED)
@@ -1623,8 +1720,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()             # H = memory value
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.sbc_a_h()            # A = A - H - !C
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_sbc_abs_nodaa')
+    asm.daa()
+    asm.label('_sbc_abs_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1659,8 +1765,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()
     asm.sbc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_sbc_absy_nodaa')
+    asm.daa()
+    asm.label('_sbc_absy_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1699,8 +1814,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.sbc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_sbc_indy_nodaa')
+    asm.daa()
+    asm.label('_sbc_indy_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1735,8 +1859,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()           # Restore A
     asm.sbc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_sbc_absx_nodaa')
+    asm.daa()
+    asm.label('_sbc_absx_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1771,8 +1904,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()
     asm.adc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_adc_indx_nodaa')
+    asm.daa()
+    asm.label('_adc_indx_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -1805,8 +1947,17 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ld_a_mem_de()
     asm.ld_h_a()
+    # Check decimal mode
+    asm.ld_a_mem_nn(D_FLAG_ADDR)
+    asm.ld_l_a()             # L = decimal flag
     asm.ex_af_af()
     asm.sbc_a_h()
+    # Apply DAA if decimal mode
+    asm.inc_l()
+    asm.dec_l()
+    asm.jr_z_label('_sbc_indx_nodaa')
+    asm.daa()
+    asm.label('_sbc_indx_nodaa')
     # Restore code bank before RET (preserve flags with EX AF,AF')
     asm.ex_af_af()           # Save A and flags to A'F'
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
@@ -3479,12 +3630,20 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.label('H_SEI')
     asm.ret()
 
-    # CLD ($D8) - no decimal mode
+    # CLD ($D8) - clear decimal mode
     asm.label('H_CLD')
+    asm.ex_af_af()              # Save A
+    asm.xor_a()                 # A = 0
+    asm.ld_mem_nn_a(D_FLAG_ADDR)
+    asm.ex_af_af()              # Restore A
     asm.ret()
 
-    # SED ($F8)
+    # SED ($F8) - set decimal mode
     asm.label('H_SED')
+    asm.ex_af_af()              # Save A
+    asm.ld_a_n(1)
+    asm.ld_mem_nn_a(D_FLAG_ADDR)
+    asm.ex_af_af()              # Restore A
     asm.ret()
 
     # CLV ($B8)
