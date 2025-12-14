@@ -437,6 +437,9 @@ def generate_runtime() -> Z80Asm:
     asm.ret()
 
     # ----- WRITE_6502: A = value, DE = 6502 addr -----
+    # NOTE: Only writes data byte, not handler byte.
+    # Handler bytes are only needed for code (threaded at load time).
+    # Data writes (variables, buffers) don't need handler bytes.
     asm.label('WRITE_6502')
     asm.ex_af_af()           # save value to A'
     # Bank select: bank = high_byte >> 5
@@ -453,13 +456,8 @@ def generate_runtime() -> Z80Asm:
     asm.rla()
     asm.or_n(0xC0)
     asm.ld_d_a()
-    # Write low byte (data)
+    # Write low byte (data only)
     asm.ex_af_af()           # restore value
-    asm.ld_mem_de_a()
-    # Write high byte (handler)
-    asm.and_n(0x0F)
-    asm.or_n(HANDLER_HIGH_BASE)
-    asm.inc_de()
     asm.ld_mem_de_a()
     asm.ret()
 
@@ -788,12 +786,13 @@ def generate_opcode_handlers() -> Z80Asm:
 
     asm.label('_lda_io_charin')
     asm.in_a_n(0x01)         # Read character from port 1
+    # No echo - BASIC does its own echoing
     asm.or_a()               # Set flags
     asm.ret()
 
     asm.label('_lda_io_status')
-    asm.ld_a_n(0x01)         # Always return "ready" (input available)
-    asm.or_a()
+    asm.in_a_n(0x02)         # Read input status from port 2 (0x01 if ready, 0x00 if not)
+    asm.or_a()               # Set flags
     asm.ret()
 
     # Inline READ_6502
@@ -923,7 +922,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.out_n_a(0x01)        # Output to console
     asm.ret()
 
-    # Inline WRITE_6502
+    # Inline WRITE_6502 (data only - no handler byte for data writes)
     asm.label('_sta_abs_write')
     asm.ld_a_d()
     asm.and_n(0xE0)
@@ -939,11 +938,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()             # DE = Z80 addr
     asm.ex_af_af()           # A = value to store
     asm.ld_l_a()             # L = 6502 A (preserve it!)
-    asm.ld_mem_de_a()        # write low byte
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()        # write high byte (handler)
+    asm.ld_mem_de_a()        # write data byte only
     # Restore code bank before RET
     asm.ld_a_l()             # A = 6502 A (restore from L)
     asm.ex_af_af()           # Save 6502 A to A'
@@ -1004,11 +999,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.or_n(0xC0)
     asm.ld_d_a()             # DE = Z80 addr
     asm.ld_a_b()             # A = X value
-    asm.ld_mem_de_a()        # Write low byte
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()        # Write handler high byte
+    asm.ld_mem_de_a()        # Write data byte only
     # Restore code bank before RET
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
     asm.out_n_a(0x00)
@@ -1036,11 +1027,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.or_n(0xC0)
     asm.ld_d_a()             # DE = Z80 addr
     asm.ld_a_c()             # A = Y value
-    asm.ld_mem_de_a()        # Write low byte
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()        # Write handler high byte
+    asm.ld_mem_de_a()        # Write data byte only
     # Restore code bank before RET
     asm.ld_a_mem_nn(CODE_BANK_ADDR)
     asm.out_n_a(0x00)
@@ -1104,7 +1091,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.jr_nc_label('_sta_indy_nc')
     asm.inc_d()
     asm.label('_sta_indy_nc')
-    # Inline WRITE_6502
+    # Inline WRITE_6502 (data only)
     asm.ld_a_d()
     asm.and_n(0xE0)
     asm.rlca()
@@ -1119,11 +1106,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ex_af_af()           # A = 6502 value
     asm.ld_l_a()             # L = 6502 A (preserve it!)
-    asm.ld_mem_de_a()
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()
+    asm.ld_mem_de_a()        # Write data byte only
     # Restore code bank and 6502 A
     asm.ld_a_l()             # A = 6502 A (restore from L)
     asm.ex_af_af()           # Save 6502 A to A'
@@ -1175,7 +1158,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_e_mem_hl()
     asm.inc_l()
     asm.ld_d_mem_hl()
-    # Inline WRITE_6502
+    # Inline WRITE_6502 (data only)
     asm.ld_a_d()
     asm.and_n(0xE0)
     asm.rlca()
@@ -1190,11 +1173,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()
     asm.ex_af_af()           # A = 6502 value
     asm.ld_l_a()             # L = 6502 A (preserve it!)
-    asm.ld_mem_de_a()
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()
+    asm.ld_mem_de_a()        # Write data byte only
     # Restore code bank and 6502 A
     asm.ld_a_l()             # A = 6502 A (restore from L)
     asm.ex_af_af()           # Save 6502 A to A'
@@ -1375,13 +1354,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()             # DE = Z80 addr
     asm.ld_a_mem_de()        # A = value
     asm.inc_a()              # Increment
-    asm.ld_mem_de_a()        # Write low byte
-    asm.ld_h_a()             # Save result for flag calc
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()        # Write handler high byte
-    asm.ld_a_h()             # Get result back
+    asm.ld_mem_de_a()        # Write data byte only
     asm.or_a()               # Set Z/N flags
     # Restore code bank before RET
     asm.ld_h_a()             # Save result in H
@@ -1414,13 +1387,7 @@ def generate_opcode_handlers() -> Z80Asm:
     asm.ld_d_a()             # DE = Z80 addr
     asm.ld_a_mem_de()        # A = value
     asm.dec_a()              # Decrement
-    asm.ld_mem_de_a()        # Write low byte
-    asm.ld_h_a()             # Save result for flag calc
-    asm.and_n(0x0F)
-    asm.or_n(0x70)
-    asm.inc_de()
-    asm.ld_mem_de_a()        # Write handler high byte
-    asm.ld_a_h()             # Get result back
+    asm.ld_mem_de_a()        # Write data byte only
     asm.or_a()               # Set Z/N flags
     # Restore code bank before RET
     asm.ld_h_a()             # Save result in H

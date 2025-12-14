@@ -99,6 +99,18 @@ class VZ80Bus(Bus):
                 # No input available
                 return 0xFF
 
+        elif port == 0x02:
+            # ACIA-style status register:
+            # Bit 0 = RDRF (Receive Data Register Full) - input available
+            # Bit 1 = TDRE (Transmit Data Register Empty) - output ready (always true)
+            status = 0x02  # Output always ready (bit 1)
+            if self.on_input:
+                # Can't peek with callback - assume ready
+                status |= 0x01
+            elif self.input_buffer:
+                status |= 0x01  # Input available (bit 0)
+            return status
+
         return 0xFF
 
     def write_io(self, port: int, val: int):
