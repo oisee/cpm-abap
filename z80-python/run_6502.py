@@ -437,7 +437,14 @@ class Emu6502Runner:
         ESC key exits the program.
         """
         self.load_program(code, org)
+        self.run_interactive_loaded()
 
+    def run_interactive_loaded(self):
+        """
+        Run already-loaded program with interactive terminal I/O.
+
+        Call load_program() first, then this method.
+        """
         # Set up raw terminal input
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
@@ -447,17 +454,20 @@ class Emu6502Runner:
             try:
                 ch = sys.stdin.read(1)
                 if ch:
+                    # Convert Enter to CR for 6502
+                    if ch == '\n':
+                        return 0x0D
                     return ord(ch)
             except:
                 pass
-            return 0  # No input
+            return 0xFF  # No input
 
         try:
             tty.setraw(fd)
             tty.setcbreak(fd)
 
             self.bus.on_input = read_key
-            self.run(max_cycles=10_000_000)
+            self.run(max_cycles=100_000_000)
 
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -480,6 +490,7 @@ Examples:
   %(prog)s program.bin          Load and run binary at $0800
   %(prog)s program.bin -o 0x300 Load at $0300
   %(prog)s -i input.txt prog.bin  Run with input from file
+  %(prog)s msbasic.bin -E 0x2730 -I  Run MS BASIC (entry at $2730)
 
 Apple II ROM traps supported:
   $FDED  COUT   - Print character (A register)
@@ -504,11 +515,16 @@ Apple II ROM traps supported:
                         help='Read input from file instead of keyboard')
     parser.add_argument('-I', '--interactive', action='store_true',
                         help='Run in interactive mode (for programs that need keyboard input)')
+    parser.add_argument('-E', '--entry', metavar='ADDR',
+                        help='Entry point address (default: same as load address)')
 
     args = parser.parse_args()
 
     # Parse origin address
     org = int(args.org, 0)  # Auto-detect hex/decimal
+
+    # Parse entry point (defaults to org if not specified)
+    entry = int(args.entry, 0) if args.entry else None
 
     # Create emulator
     emu = Emu6502Runner(verbose=args.verbose)
@@ -555,19 +571,30 @@ Apple II ROM traps supported:
         print("-" * 40)
         interactive = False
 
+    # Helper to apply entry point override
+    def apply_entry_override(emu, entry_addr):
+        if entry_addr is not None:
+            emu.start_bank = entry_addr >> 13
+            emu.start_addr = 0xC000 + ((entry_addr & 0x1FFF) * 2)
+            print(f"Entry point: ${entry_addr:04X}")
+
     # Handle input source
     if args.input:
         # Read input from file - overrides interactive mode
         with open(args.input, 'rb') as f:
             emu.bus.input_buffer = f.read().decode('latin-1')
         emu.load_program(code, org)
+        apply_entry_override(emu, entry)
         emu.run()
     elif interactive:
         # Interactive mode for echo program
-        emu.run_interactive(code, org)
+        emu.load_program(code, org)
+        apply_entry_override(emu, entry)
+        emu.run_interactive_loaded()
     else:
         # Non-interactive run
         emu.load_program(code, org)
+        apply_entry_override(emu, entry)
         emu.run()
 
     print("-" * 40)
