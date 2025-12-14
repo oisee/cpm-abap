@@ -328,25 +328,152 @@ Output: "HI\n"
 
 ---
 
+## Progress Update: December 13, 2025
+
+### Capabilities Added Since Initial Report
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Shadow Stack JSR/RTS | ✓ Complete | Separate return address stack |
+| Indexed Addressing | ✓ Complete | abs,X / abs,Y / zp,X / zp,Y |
+| Indirect Addressing | ✓ Complete | (zp),Y and (zp,X) |
+| Inline Data in Code | ✓ Working | Threading preserves original bytes |
+| Multi-Bank Loading | ✓ Complete | Programs > 8KB correctly distributed |
+| ROM Traps $F800-$FBFF | ✓ Complete | VIDOUT, BASCALC, PLOT, etc. |
+
+### Opcodes Implemented: 63/256
+
+**Load/Store:** LDA, LDX, LDY, STA, STX, STY (imm, zp, zpx/y, abs, absx/y, indx, indy)
+**Arithmetic:** ADC, SBC (imm only)
+**Logic:** AND, ORA, EOR (imm only)
+**Compare:** CMP, CPX, CPY (imm only)
+**Branch:** BEQ, BNE, BCS, BCC, BMI, BPL
+**Jump:** JMP abs, JSR, RTS
+**Stack:** PHA, PLA
+**Transfer:** TAX, TXA, TAY, TYA, TXS, TSX
+**Inc/Dec:** INX, DEX, INY, DEY, INC zp, DEC zp
+**Flags:** CLC, SEC, CLI, SEI, CLD, SED, CLV
+**Other:** NOP, BRK
+
+### Test Programs Successfully Running
+
+1. **Hello World** - Simple character output
+2. **Echo Program** - Interactive keyboard input, digit doubling
+3. **Counter 0-9** - Loop with branch instructions
+4. **Hello Name** - Interactive input with inline strings
+
+### Real-World Game Test: Scott Adams' Adventureland
+
+Extracted and tested the Apple II port of "Adventureland" (1978):
+- **File:** `adventureland.bin` (20,336 bytes)
+- **Origin:** DOS 3.3 disk image
+- **Result:** Execution crosses bank boundaries correctly
+
+```
+Step 122: 6502 $083A -> H_JSR
+Step 161: 6502 $2E3D -> H_JMP_ABS  ← Bank 1!
+Step 201: 6502 $0CB2 -> H_JSR
+...
+*** HALT at step 305: A=$79 ***  ← Missing opcode
+```
+
+**Blockers:** ~50 additional opcodes needed (ADC zp/abs, EOR zp, JMP indirect, etc.)
+
+---
+
+## Critical Bugs Fixed
+
+### Bug #1: Bank Select Calculation
+
+```z80
+; WRONG: Masked value, not bank number
+LD A, D
+AND $E0
+OUT (0), A   ; $20 for addr $2xxx - selects bank 32!
+
+; FIXED: Rotate to get bank 0-7
+LD A, D
+AND $E0
+RLCA
+RLCA
+RLCA
+OUT (0), A   ; 1 for addr $2xxx - correct!
+```
+
+### Bug #2: Single-Bank Loading
+
+```python
+# WRONG: All code in bank 0
+for i, b in enumerate(threaded):
+    bus.banked_memory[0][code_offset + i] = b
+
+# FIXED: Distribute by 6502 address
+for i in range(len(code)):
+    addr_6502 = org + i
+    bank = addr_6502 >> 13
+    offset = (addr_6502 & 0x1FFF) * 2
+    bus.banked_memory[bank][offset:offset+2] = threaded[i*2:i*2+2]
+```
+
+---
+
+## Updated Code Sizes
+
+| Section | Address | Size |
+|---------|---------|------|
+| HLE Traps | $6000 | 35 bytes |
+| Opcode Handlers | $6100 | 3093 bytes |
+| Handler Table | $7000 | 4096 bytes |
+| Runtime | $8300 | 121 bytes |
+| **Total** | | **~7.3 KB** |
+
+---
+
+## Progress Update: December 14, 2025
+
+### MS BASIC Running!
+
+Successfully tested Microsoft BASIC (from BASIC-M6502 project) on the emulator:
+- **Memory-mapped I/O**: Added support for $FFF0-$FFF3 I/O addresses
+- **Zero Page Execution**: Implemented ZP sync for JSR to zero page (CHRGET routine)
+- **Branch A Register**: Fixed all branch instructions to preserve 6502 A register
+- **RTS A Register**: Fixed RTS to preserve A through bank restore
+
+**Current Status**: MS BASIC shows prompts, accepts input, responds with error messages.
+Output has some corruption (control codes) that needs investigation.
+
+### Bugs Fixed This Session
+
+1. **RTS destroys A register**: RTS used A for bank restore without saving it first
+2. **Branch instructions destroy A**: emit_branch_taken used A for offset calculation
+3. **No ZP execution**: JSR to zero page ($00xx) didn't sync linear ZP to threaded code
+4. **Missing opcodes**: Added unofficial NOPs ($C2, $E2, $89)
+
+### Opcodes Implemented: 145/256
+
+---
+
 ## Next Steps
 
-1. **Shadow Stack for JSR/RTS** - Enable proper subroutine calls
-2. **More Opcodes** - Indexed, indirect addressing modes
-3. **Real Program Test** - Scott Adams adventures or similar
-4. **Hardware Target** - ZX Spectrum 128K or ZX Next
+1. **Debug MS BASIC output corruption** - Control codes appearing in output
+2. **Number printing** - May need arithmetic fixes
+3. **Hardware Target** - ZX Spectrum 128K or ZX Next
 
 ---
 
 ## Commits
 
 ```
+ce4ee2e Fix bank select and multi-bank loading for large programs
+0ad30ea Update progress report: 6502 echo program complete
+f38c131 Add RDKEY trap and complete 6502 echo program
+776b9b8 Fix branch instructions and add interactive testing tool
+1bfccec Add shadow stack JSR/RTS, indexed/indirect addressing modes
 51844d0 First successful 6502 program execution on Z80 threaded code emulator!
 64635dc Add Z80 runtime generator for 6502 threaded code emulator
-d567a70 Add dual banking designs: 16KB@C000 (primary) + 32KB@0000 (VZ80)
-1b5a94f Add Phase 3 design: Z80 native HLE architecture
 ```
 
 ---
 
-*Report generated: December 12, 2025*
-*Status: Phase 3 - First Successful Test Complete*
+*Report updated: December 14, 2025*
+*Status: Phase 4 - MS BASIC Running (with output issues), 145 Opcodes Implemented*

@@ -243,6 +243,9 @@ class Emu6502Runner:
         0xFD0C: 'TRAP_RDKEY',   # Read key
         0xFD6A: 'TRAP_GETLN',   # Get line
         0xFC58: 'TRAP_HOME',    # Clear screen / home cursor
+        # Microsoft BASIC I/O addresses
+        0xFFF0: 'TRAP_COUT',    # CHAROUT - same as COUT
+        0xFFF1: 'TRAP_RDKEY',   # CHARIN - same as RDKEY
     }
 
     def __init__(self, verbose: bool = False):
@@ -406,6 +409,10 @@ class Emu6502Runner:
         self.cpu.sp = self.start_addr
         self.cpu.pc = 0x8200  # Points to RET instruction to start threading
         self.bus.current_bank = getattr(self, 'start_bank', 0)
+
+        # Initialize CODE_BANK_ADDR ($8F04) with starting bank
+        CODE_BANK_ADDR = 0x8F04
+        self.bus.write_mem(CODE_BANK_ADDR, self.bus.current_bank)
 
         self._log(f"Starting execution: PC=${self.cpu.pc:04X} SP=${self.cpu.sp:04X}")
 
