@@ -106,13 +106,21 @@ class CPMFile:
     def open_file(self, bus: CpmBus, fcb_addr: int) -> int:
         """Open file (BDOS function 15)"""
         filename = self.fcb_to_filename(bus, fcb_addr)
+
+        # Check if already open at this FCB (e.g., after MAKE)
+        if fcb_addr in self.open_files:
+            # Already open, just reset position
+            self.open_files[fcb_addr].seek(0)
+            bus.write_mem(fcb_addr + 32, 0)  # cr = 0
+            return 0
+
         filepath = self.find_file(filename)
 
         if filepath is None or not os.path.exists(filepath):
             return 0xFF
 
         try:
-            fh = open(filepath, 'rb')
+            fh = open(filepath, 'r+b')  # Open for read/write
             self.open_files[fcb_addr] = fh
             self.fcb_to_path[fcb_addr] = filepath
 
@@ -134,8 +142,24 @@ class CPMFile:
             return 0
 
         except Exception as e:
-            print(f"[FILE] Error opening {filename}: {e}")
-            return 0xFF
+            # Try read-only if r+b fails
+            try:
+                fh = open(filepath, 'rb')
+                self.open_files[fcb_addr] = fh
+                self.fcb_to_path[fcb_addr] = filepath
+                bus.write_mem(fcb_addr + 12, 0)
+                bus.write_mem(fcb_addr + 13, 0)
+                bus.write_mem(fcb_addr + 14, 0)
+                bus.write_mem(fcb_addr + 32, 0)
+                fh.seek(0, 2)
+                size = fh.tell()
+                records = (size + 127) // 128
+                fh.seek(0)
+                bus.write_mem(fcb_addr + 15, min(records, 128) & 0xFF)
+                return 0
+            except:
+                print(f"[FILE] Error opening {filename}: {e}")
+                return 0xFF
 
     def close_file(self, bus: CpmBus, fcb_addr: int) -> int:
         """Close file (BDOS function 16)"""
@@ -222,6 +246,73 @@ class CPMFile:
             return 0
         except Exception:
             return 0xFF
+
+    def make_file(self, bus: CpmBus, fcb_addr: int) -> int:
+        """Create new file (BDOS function 22)"""
+        filename = self.fcb_to_filename(bus, fcb_addr)
+        filepath = os.path.join(self.directory, filename.upper())
+
+        try:
+            fh = open(filepath, 'w+b')  # Read/write mode
+            self.open_files[fcb_addr] = fh
+            self.fcb_to_path[fcb_addr] = filepath
+            self.write_mode = getattr(self, 'write_mode', {})
+            self.write_mode[fcb_addr] = True  # Mark as write mode
+
+            # Initialize FCB fields
+            bus.write_mem(fcb_addr + 12, 0)  # s1 = 0
+            bus.write_mem(fcb_addr + 13, 0)  # s2 = 0
+            bus.write_mem(fcb_addr + 14, 0)  # rc = 0
+            bus.write_mem(fcb_addr + 32, 0)  # cr = 0
+
+            return 0
+        except Exception as e:
+            print(f"[FILE] Error creating {filename}: {e}")
+            return 0xFF
+
+    def write_sequential(self, bus: CpmBus, fcb_addr: int) -> int:
+        """Write sequential record (BDOS function 21)"""
+        if fcb_addr not in self.open_files:
+            return 1
+
+        fh = self.open_files[fcb_addr]
+
+        # Read 128 bytes from DMA
+        data = bytes([bus.read_mem(bus.dma_addr + i) for i in range(128)])
+
+        try:
+            fh.write(data)
+
+            # Update current record in FCB
+            cr = bus.read_mem(fcb_addr + 32)
+            bus.write_mem(fcb_addr + 32, (cr + 1) & 0xFF)
+
+            return 0
+        except Exception:
+            return 1
+
+    def write_random(self, bus: CpmBus, fcb_addr: int) -> int:
+        """Random write (BDOS function 34)"""
+        if fcb_addr not in self.open_files:
+            return 6
+
+        r0 = bus.read_mem(fcb_addr + 33)
+        r1 = bus.read_mem(fcb_addr + 34)
+        r2 = bus.read_mem(fcb_addr + 35)
+        record = r0 | (r1 << 8) | (r2 << 16)
+
+        fh = self.open_files[fcb_addr]
+        offset = record * 128
+
+        # Read 128 bytes from DMA
+        data = bytes([bus.read_mem(bus.dma_addr + i) for i in range(128)])
+
+        try:
+            fh.seek(offset)
+            fh.write(data)
+            return 0
+        except Exception:
+            return 6
 
 
 class CpmEmulator:
@@ -438,10 +529,15 @@ class CpmEmulator:
                 print(f"[BDOS] Read seq -> EOF")
 
         elif func == self.BDOS_WRITE_SEQ:
-            self.cpu.set_a(0xFF)
+            result = self.files.write_sequential(self.bus, self.cpu.get_de())
+            self.cpu.set_a(result)
 
         elif func == self.BDOS_MAKE_FILE:
-            self.cpu.set_a(0xFF)
+            result = self.files.make_file(self.bus, self.cpu.get_de())
+            self.cpu.set_a(result)
+            if self.debug:
+                fname = self.files.fcb_to_filename(self.bus, self.cpu.get_de())
+                print(f"[BDOS] Make '{fname}' -> {result}")
 
         elif func == self.BDOS_RENAME_FILE:
             self.cpu.set_a(0xFF)
@@ -488,7 +584,8 @@ class CpmEmulator:
                 print(f"[BDOS] Read random rec={rec} -> {result}")
 
         elif func == self.BDOS_WRITE_RAND:
-            self.cpu.set_a(0xFF)
+            result = self.files.write_random(self.bus, self.cpu.get_de())
+            self.cpu.set_a(result)
 
         elif func == self.BDOS_FILE_SIZE:
             result = self.files.get_file_size(self.bus, self.cpu.get_de())
