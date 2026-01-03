@@ -30,3 +30,4 @@ credentials*.json
 
 # Windows metadata
 *:Zone.Identifier
+hobbit-disasm/

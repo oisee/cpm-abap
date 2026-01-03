@@ -529,6 +529,212 @@ class Z80:
 
         return 15 if reg == 6 else 8
 
+    def exec_dd_fd(self, idx_reg: int, is_ix: bool) -> int:
+        """Execute DD/FD prefixed instruction (IX/IY operations)"""
+        op = self.fetch8()
+        cycles = 8
+
+        # LD IX/IY,nn
+        if op == 0x21:
+            nn = self.fetch16()
+            self._dd_fd_result = nn
+            cycles = 14
+
+        # LD (nn),IX/IY
+        elif op == 0x22:
+            addr = self.fetch16()
+            self.write16(addr, idx_reg)
+            cycles = 20
+
+        # LD IX/IY,(nn)
+        elif op == 0x2A:
+            addr = self.fetch16()
+            self._dd_fd_result = self.read16(addr)
+            cycles = 20
+
+        # INC IX/IY
+        elif op == 0x23:
+            self._dd_fd_result = (idx_reg + 1) & 0xFFFF
+            cycles = 10
+
+        # DEC IX/IY
+        elif op == 0x2B:
+            self._dd_fd_result = (idx_reg - 1) & 0xFFFF
+            cycles = 10
+
+        # ADD IX/IY,rr
+        elif op == 0x09:  # ADD IX/IY,BC
+            result = idx_reg + self.bc
+            flags = self.f & (FLAG_S | FLAG_Z | FLAG_PV)
+            if result > 0xFFFF: flags |= FLAG_C
+            if ((idx_reg & 0xFFF) + (self.bc & 0xFFF)) > 0xFFF: flags |= FLAG_H
+            self._dd_fd_result = result & 0xFFFF
+            self.f = flags
+            cycles = 15
+        elif op == 0x19:  # ADD IX/IY,DE
+            result = idx_reg + self.de
+            flags = self.f & (FLAG_S | FLAG_Z | FLAG_PV)
+            if result > 0xFFFF: flags |= FLAG_C
+            self._dd_fd_result = result & 0xFFFF
+            self.f = flags
+            cycles = 15
+        elif op == 0x29:  # ADD IX/IY,IX/IY
+            result = idx_reg + idx_reg
+            flags = self.f & (FLAG_S | FLAG_Z | FLAG_PV)
+            if result > 0xFFFF: flags |= FLAG_C
+            self._dd_fd_result = result & 0xFFFF
+            self.f = flags
+            cycles = 15
+        elif op == 0x39:  # ADD IX/IY,SP
+            result = idx_reg + self.sp
+            flags = self.f & (FLAG_S | FLAG_Z | FLAG_PV)
+            if result > 0xFFFF: flags |= FLAG_C
+            self._dd_fd_result = result & 0xFFFF
+            self.f = flags
+            cycles = 15
+
+        # PUSH IX/IY
+        elif op == 0xE5:
+            self.push16(idx_reg)
+            cycles = 15
+
+        # POP IX/IY
+        elif op == 0xE1:
+            self._dd_fd_result = self.pop16()
+            cycles = 14
+
+        # JP (IX/IY)
+        elif op == 0xE9:
+            self.pc = idx_reg
+            cycles = 8
+
+        # LD SP,IX/IY
+        elif op == 0xF9:
+            self.sp = idx_reg
+            cycles = 10
+
+        # EX (SP),IX/IY
+        elif op == 0xE3:
+            tmp = self.read16(self.sp)
+            self.write16(self.sp, idx_reg)
+            self._dd_fd_result = tmp
+            cycles = 23
+
+        # LD r,(IX/IY+d) and LD (IX/IY+d),r
+        elif op in [0x46, 0x4E, 0x56, 0x5E, 0x66, 0x6E, 0x7E]:  # LD r,(IX+d)
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            addr = (idx_reg + d) & 0xFFFF
+            val = self.read8(addr)
+            reg = (op >> 3) & 7
+            self.set_reg8(reg, val)
+            cycles = 19
+        elif op in [0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x77]:  # LD (IX+d),r
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            addr = (idx_reg + d) & 0xFFFF
+            reg = op & 7
+            self.write8(addr, self.get_reg8(reg))
+            cycles = 19
+
+        # LD (IX/IY+d),n
+        elif op == 0x36:
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            n = self.fetch8()
+            addr = (idx_reg + d) & 0xFFFF
+            self.write8(addr, n)
+            cycles = 19
+
+        # INC/DEC (IX/IY+d)
+        elif op == 0x34:  # INC (IX+d)
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            addr = (idx_reg + d) & 0xFFFF
+            val = self.alu_inc8(self.read8(addr))
+            self.write8(addr, val)
+            cycles = 23
+        elif op == 0x35:  # DEC (IX+d)
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            addr = (idx_reg + d) & 0xFFFF
+            val = self.alu_dec8(self.read8(addr))
+            self.write8(addr, val)
+            cycles = 23
+
+        # ALU A,(IX/IY+d)
+        elif 0x86 <= op <= 0xBE and (op & 7) == 6:
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            addr = (idx_reg + d) & 0xFFFF
+            val = self.read8(addr)
+            alu_op = (op >> 3) & 7
+            if alu_op == 0: self.alu_add8(val)
+            elif alu_op == 1: self.alu_add8(val, with_carry=True)
+            elif alu_op == 2: self.alu_sub8(val)
+            elif alu_op == 3: self.alu_sub8(val, with_carry=True)
+            elif alu_op == 4: self.alu_and8(val)
+            elif alu_op == 5: self.alu_xor8(val)
+            elif alu_op == 6: self.alu_or8(val)
+            elif alu_op == 7: self.alu_cp8(val)
+            cycles = 19
+
+        # CB prefix with IX/IY (bit operations on (IX+d))
+        elif op == 0xCB:
+            d = self.fetch8()
+            if d >= 128: d -= 256
+            cb_op = self.fetch8()
+            addr = (idx_reg + d) & 0xFFFF
+            val = self.read8(addr)
+
+            group = cb_op >> 6
+            subop = (cb_op >> 3) & 7
+
+            if group == 0:  # Rotate/shift
+                if subop == 0: result = self.alu_rlc(val)
+                elif subop == 1: result = self.alu_rrc(val)
+                elif subop == 2: result = self.alu_rl(val)
+                elif subop == 3: result = self.alu_rr(val)
+                elif subop == 4: result = self.alu_sla(val)
+                elif subop == 5: result = self.alu_sra(val)
+                elif subop == 6: result = ((val << 1) | 1) & 0xFF  # SLL
+                elif subop == 7: result = self.alu_srl(val)
+                self.write8(addr, result)
+            elif group == 1:  # BIT
+                bit = subop
+                mask = 1 << bit
+                flags = self.f & FLAG_C
+                flags |= FLAG_H
+                if not (val & mask):
+                    flags |= FLAG_Z
+                self.f = flags
+            elif group == 2:  # RES
+                bit = subop
+                mask = 1 << bit
+                self.write8(addr, val & ~mask)
+            elif group == 3:  # SET
+                bit = subop
+                mask = 1 << bit
+                self.write8(addr, val | mask)
+
+            cycles = 23
+
+        # LD IXH/IXL or IYH/IYL (undocumented)
+        elif op == 0x26:  # LD IXH/IYH,n
+            n = self.fetch8()
+            self._dd_fd_result = (idx_reg & 0xFF) | (n << 8)
+            cycles = 11
+        elif op == 0x2E:  # LD IXL/IYL,n
+            n = self.fetch8()
+            self._dd_fd_result = (idx_reg & 0xFF00) | n
+            cycles = 11
+
+        else:
+            # Unimplemented - just skip
+            cycles = 8
+
+        return cycles
+
     def exec_main(self, opcode: int) -> int:
         """Execute main opcode, return cycles"""
         cycles = 4  # Default
@@ -967,23 +1173,27 @@ class Z80:
             self.f = (self.f & (FLAG_S | FLAG_Z | FLAG_PV)) | carry | half
             cycles = 4
 
-        # IN A,(n)
+        # IN A,(n) - Full 16-bit port address: A*256 + n
         elif opcode == 0xDB:
-            port = self.fetch8()
-            self.a = self.bus.read_io(port)
+            port_low = self.fetch8()
+            port_full = (self.a << 8) | port_low  # A is high byte
+            self.a = self.bus.read_io(port_full)
             cycles = 11
 
-        # OUT (n),A
+        # OUT (n),A - Full 16-bit port address: A*256 + n
         elif opcode == 0xD3:
-            port = self.fetch8()
-            self.bus.write_io(port, self.a)
+            port_low = self.fetch8()
+            port_full = (self.a << 8) | port_low  # A is high byte
+            self.bus.write_io(port_full, self.a)
             cycles = 11
 
-        # DD prefix (IX) - simplified
+        # DD prefix (IX)
         elif opcode == 0xDD:
-            # For now, just skip the next byte and treat as NOP
-            self.fetch8()
-            cycles = 8
+            cycles = self.exec_dd_fd(self.ix, True)
+            # Update IX if modified
+            if hasattr(self, '_dd_fd_result'):
+                self.ix = self._dd_fd_result
+                del self._dd_fd_result
 
         # ED prefix instructions
         elif opcode == 0xED:
@@ -1029,14 +1239,284 @@ class Z80:
                 self.l = self.bus.read_mem(addr)
                 self.h = self.bus.read_mem(addr + 1)
                 cycles = 20
+
+            # Block transfer instructions
+            elif ed_op == 0xA0:  # LDI - Load and Increment
+                val = self.read8(self.hl)
+                self.write8(self.de, val)
+                self.hl = (self.hl + 1) & 0xFFFF
+                self.de = (self.de + 1) & 0xFFFF
+                self.bc = (self.bc - 1) & 0xFFFF
+                self.f = (self.f & (FLAG_S | FLAG_Z | FLAG_C)) | (FLAG_PV if self.bc != 0 else 0)
+                cycles = 16
+
+            elif ed_op == 0xB0:  # LDIR - Block Load, Increment, Repeat
+                while True:
+                    val = self.read8(self.hl)
+                    self.write8(self.de, val)
+                    self.hl = (self.hl + 1) & 0xFFFF
+                    self.de = (self.de + 1) & 0xFFFF
+                    self.bc = (self.bc - 1) & 0xFFFF
+                    cycles += 21
+                    if self.bc == 0:
+                        break
+                self.f = self.f & (FLAG_S | FLAG_Z | FLAG_C)  # Clear H, N, PV
+                cycles = 16  # Final iteration
+
+            elif ed_op == 0xA8:  # LDD - Load and Decrement
+                val = self.read8(self.hl)
+                self.write8(self.de, val)
+                self.hl = (self.hl - 1) & 0xFFFF
+                self.de = (self.de - 1) & 0xFFFF
+                self.bc = (self.bc - 1) & 0xFFFF
+                self.f = (self.f & (FLAG_S | FLAG_Z | FLAG_C)) | (FLAG_PV if self.bc != 0 else 0)
+                cycles = 16
+
+            elif ed_op == 0xB8:  # LDDR - Block Load, Decrement, Repeat
+                while True:
+                    val = self.read8(self.hl)
+                    self.write8(self.de, val)
+                    self.hl = (self.hl - 1) & 0xFFFF
+                    self.de = (self.de - 1) & 0xFFFF
+                    self.bc = (self.bc - 1) & 0xFFFF
+                    cycles += 21
+                    if self.bc == 0:
+                        break
+                self.f = self.f & (FLAG_S | FLAG_Z | FLAG_C)
+                cycles = 16
+
+            # Compare block instructions
+            elif ed_op == 0xA1:  # CPI - Compare and Increment
+                val = self.read8(self.hl)
+                result = (self.a - val) & 0xFF
+                self.hl = (self.hl + 1) & 0xFFFF
+                self.bc = (self.bc - 1) & 0xFFFF
+                flags = FLAG_N
+                if result == 0: flags |= FLAG_Z
+                if result & 0x80: flags |= FLAG_S
+                if self.bc != 0: flags |= FLAG_PV
+                if (self.a & 0xF) < (val & 0xF): flags |= FLAG_H
+                self.f = (self.f & FLAG_C) | flags
+                cycles = 16
+
+            elif ed_op == 0xB1:  # CPIR - Block Compare, Increment, Repeat
+                while True:
+                    val = self.read8(self.hl)
+                    result = (self.a - val) & 0xFF
+                    self.hl = (self.hl + 1) & 0xFFFF
+                    self.bc = (self.bc - 1) & 0xFFFF
+                    cycles += 21
+                    if result == 0 or self.bc == 0:
+                        break
+                flags = FLAG_N
+                if result == 0: flags |= FLAG_Z
+                if result & 0x80: flags |= FLAG_S
+                if self.bc != 0: flags |= FLAG_PV
+                if (self.a & 0xF) < (val & 0xF): flags |= FLAG_H
+                self.f = (self.f & FLAG_C) | flags
+                cycles = 16
+
+            # I/O block instructions
+            elif ed_op == 0x44:  # NEG
+                val = self.a
+                self.a = (0 - val) & 0xFF
+                flags = FLAG_N
+                if self.a == 0: flags |= FLAG_Z
+                if self.a & 0x80: flags |= FLAG_S
+                if val != 0: flags |= FLAG_C
+                if val == 0x80: flags |= FLAG_PV
+                if (val & 0xF) != 0: flags |= FLAG_H
+                self.f = flags
+                cycles = 8
+
+            elif ed_op == 0x46:  # IM 0
+                self.im = 0
+                cycles = 8
+            elif ed_op == 0x56:  # IM 1
+                self.im = 1
+                cycles = 8
+            elif ed_op == 0x5E:  # IM 2
+                self.im = 2
+                cycles = 8
+
+            elif ed_op == 0x47:  # LD I,A
+                self.i = self.a
+                cycles = 9
+            elif ed_op == 0x4F:  # LD R,A
+                self.r = self.a
+                cycles = 9
+            elif ed_op == 0x57:  # LD A,I
+                self.a = self.i
+                flags = self.f & FLAG_C
+                if self.a == 0: flags |= FLAG_Z
+                if self.a & 0x80: flags |= FLAG_S
+                if self.iff2: flags |= FLAG_PV
+                self.f = flags
+                cycles = 9
+            elif ed_op == 0x5F:  # LD A,R
+                self.a = self.r
+                flags = self.f & FLAG_C
+                if self.a == 0: flags |= FLAG_Z
+                if self.a & 0x80: flags |= FLAG_S
+                if self.iff2: flags |= FLAG_PV
+                self.f = flags
+                cycles = 9
+
+            elif ed_op == 0x4D:  # RETI
+                self.pc = self.pop16()
+                cycles = 14
+            elif ed_op == 0x45:  # RETN
+                self.iff1 = self.iff2
+                self.pc = self.pop16()
+                cycles = 14
+
+            # IN/OUT with (C)
+            elif ed_op == 0x40:  # IN B,(C)
+                self.b = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.b]
+                cycles = 12
+            elif ed_op == 0x48:  # IN C,(C)
+                self.c = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.c]
+                cycles = 12
+            elif ed_op == 0x50:  # IN D,(C)
+                self.d = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.d]
+                cycles = 12
+            elif ed_op == 0x58:  # IN E,(C)
+                self.e = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.e]
+                cycles = 12
+            elif ed_op == 0x60:  # IN H,(C)
+                self.h = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.h]
+                cycles = 12
+            elif ed_op == 0x68:  # IN L,(C)
+                self.l = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.l]
+                cycles = 12
+            elif ed_op == 0x78:  # IN A,(C)
+                self.a = self.bus.read_io(self.c)
+                self.f = (self.f & FLAG_C) | self.szp_flags[self.a]
+                cycles = 12
+
+            elif ed_op == 0x41:  # OUT (C),B
+                self.bus.write_io(self.c, self.b)
+                cycles = 12
+            elif ed_op == 0x49:  # OUT (C),C
+                self.bus.write_io(self.c, self.c)
+                cycles = 12
+            elif ed_op == 0x51:  # OUT (C),D
+                self.bus.write_io(self.c, self.d)
+                cycles = 12
+            elif ed_op == 0x59:  # OUT (C),E
+                self.bus.write_io(self.c, self.e)
+                cycles = 12
+            elif ed_op == 0x61:  # OUT (C),H
+                self.bus.write_io(self.c, self.h)
+                cycles = 12
+            elif ed_op == 0x69:  # OUT (C),L
+                self.bus.write_io(self.c, self.l)
+                cycles = 12
+            elif ed_op == 0x79:  # OUT (C),A
+                self.bus.write_io(self.c, self.a)
+                cycles = 12
+
+            # 16-bit arithmetic
+            elif ed_op == 0x42:  # SBC HL,BC
+                result = self.hl - self.bc - (1 if self.get_flag(FLAG_C) else 0)
+                flags = FLAG_N
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result < 0: flags |= FLAG_C
+                if ((self.hl ^ self.bc) & (self.hl ^ result) & 0x8000): flags |= FLAG_PV
+                if ((self.hl & 0xFFF) - (self.bc & 0xFFF) - (1 if self.get_flag(FLAG_C) else 0)) < 0: flags |= FLAG_H
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x52:  # SBC HL,DE
+                result = self.hl - self.de - (1 if self.get_flag(FLAG_C) else 0)
+                flags = FLAG_N
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result < 0: flags |= FLAG_C
+                if ((self.hl ^ self.de) & (self.hl ^ result) & 0x8000): flags |= FLAG_PV
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x62:  # SBC HL,HL
+                result = self.hl - self.hl - (1 if self.get_flag(FLAG_C) else 0)
+                flags = FLAG_N
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result < 0: flags |= FLAG_C
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x72:  # SBC HL,SP
+                result = self.hl - self.sp - (1 if self.get_flag(FLAG_C) else 0)
+                flags = FLAG_N
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result < 0: flags |= FLAG_C
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+
+            elif ed_op == 0x4A:  # ADC HL,BC
+                carry = 1 if self.get_flag(FLAG_C) else 0
+                result = self.hl + self.bc + carry
+                flags = 0
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result > 0xFFFF: flags |= FLAG_C
+                if ((self.hl ^ result) & (self.bc ^ result) & 0x8000): flags |= FLAG_PV
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x5A:  # ADC HL,DE
+                carry = 1 if self.get_flag(FLAG_C) else 0
+                result = self.hl + self.de + carry
+                flags = 0
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result > 0xFFFF: flags |= FLAG_C
+                if ((self.hl ^ result) & (self.de ^ result) & 0x8000): flags |= FLAG_PV
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x6A:  # ADC HL,HL
+                carry = 1 if self.get_flag(FLAG_C) else 0
+                result = self.hl + self.hl + carry
+                flags = 0
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result > 0xFFFF: flags |= FLAG_C
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+            elif ed_op == 0x7A:  # ADC HL,SP
+                carry = 1 if self.get_flag(FLAG_C) else 0
+                result = self.hl + self.sp + carry
+                flags = 0
+                if (result & 0xFFFF) == 0: flags |= FLAG_Z
+                if result & 0x8000: flags |= FLAG_S
+                if result > 0xFFFF: flags |= FLAG_C
+                self.hl = result & 0xFFFF
+                self.f = flags
+                cycles = 15
+
             else:
                 # Unimplemented ED instruction - NOP
                 cycles = 8
 
-        # FD prefix (IY) - simplified
+        # FD prefix (IY)
         elif opcode == 0xFD:
-            self.fetch8()
-            cycles = 8
+            cycles = self.exec_dd_fd(self.iy, False)
+            # Update IY if modified
+            if hasattr(self, '_dd_fd_result'):
+                self.iy = self._dd_fd_result
+                del self._dd_fd_result
 
         self.cycles += cycles
         return cycles
