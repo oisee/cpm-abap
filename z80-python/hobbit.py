@@ -304,24 +304,47 @@ class HobbitEmulator:
             pass
         elif char == 23:  # TAB control
             pass
-        elif char >= 32 and char < 127:
+        elif char == 32:  # Space - use same logic as PrintPropChar
+            self.leading_spaces += 1
+            if self.skip_leading_spaces:
+                pass  # Skip leading spaces
+            elif self.leading_spaces >= 8 and self.current_column > 0:
+                # Column positioning - convert to newline
+                self.output_buffer += '\n'
+                print(flush=True)
+                self.current_column = 0
+                self.leading_spaces = 0
+                self.skip_leading_spaces = True
+            elif self.leading_spaces == 1:
+                pass  # Wait to see if more spaces follow
+            # else: accumulating spaces
+        elif char > 32 and char < 127:
+            # Non-space printable - output any pending single spaces first
+            if self.leading_spaces >= 1 and self.leading_spaces < 8 and not self.skip_leading_spaces:
+                self.output_buffer += ' '
+                print(' ', end='', flush=True)
+                self.current_column += 1
+            self.leading_spaces = 0
+            self.skip_leading_spaces = False
             # Filter out "+" which appears to be a formatting artifact
             if char != 43:  # Skip "+"
                 self.output_buffer += chr(char)
                 print(chr(char), end='', flush=True)
                 self.current_column += 1
-                self.skip_leading_spaces = False
         elif char == 127:  # Delete / copyright symbol
+            self.leading_spaces = 0
             self.output_buffer += '(C)'
             print('(C)', end='', flush=True)
             self.current_column += 3
         elif char >= 128 and char <= 143:
             # Spectrum block graphics - show as block
+            self.leading_spaces = 0
             self.output_buffer += '#'
             print('#', end='', flush=True)
             self.current_column += 1
         elif char >= 144:
             # UDGs - show placeholder
+            self.leading_spaces = 0
             self.output_buffer += '?'
             print('?', end='', flush=True)
             self.current_column += 1
