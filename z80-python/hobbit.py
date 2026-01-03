@@ -380,6 +380,7 @@ class HobbitEmulator:
                     self.output_buffer += '\n'
                     print(flush=True)
                     self.current_column = 0
+                    self.leading_spaces = 0  # Reset space counter
                     self.skip_leading_spaces = True  # Skip remaining spaces
                     self.last_was_newline = True
                 elif self.leading_spaces == 1:
@@ -451,6 +452,8 @@ class HobbitEmulator:
 
         In HALT mode: blocks until user provides input
         This prevents NPCs from acting while waiting for player input.
+
+        Note: The game has its own ">" prompt, so we don't print one.
         """
         # If we have queued input, return next character
         if self.input_queue:
@@ -465,14 +468,14 @@ class HobbitEmulator:
             if self.auto_commands:
                 # Use auto-command
                 cmd = self.auto_commands.pop(0)
-                print(f"> {cmd}")
+                print(cmd)  # Game already printed ">"
                 self.input_queue = cmd + '\r'
                 char = ord(self.input_queue[0])
                 self.input_queue = self.input_queue[1:]
                 self.cpu.a = char
             else:
                 # Wait for user input (blocking)
-                print("> ", end='', flush=True)
+                # Game prints its own ">" prompt, so we just wait
                 try:
                     user_input = input()
                     if user_input:
