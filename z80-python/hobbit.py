@@ -943,7 +943,8 @@ def main():
     emu.debug = args.debug
     emu.trace = args.trace
     emu.show_graphics_placeholder = args.graphics
-    emu.render_graphics = args.render
+    # -g implies -r (need to run draw routine to populate screen memory)
+    emu.render_graphics = args.render or args.graphics
     emu.graphics_scale = args.scale
 
     # Queue auto-commands (if provided via -c)
