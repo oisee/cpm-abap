@@ -204,17 +204,18 @@ class VirtualScreen:
         self.pen_x = x
         self.pen_y = y
 
-    def render_to_text(self, scale: int = 2) -> str:
+    def render_to_text(self, scale: int = 2, invert: bool = False, max_rows: int = None) -> str:
         """
         Render framebuffer to Unicode block characters
         scale=2 means 2x2 pixels per character (128x88 chars)
         scale=4 means 4x4 pixels per character (64x44 chars)
+        invert: swap filled/empty pixels
+        max_rows: limit to top N pixel rows (for cropping text area)
         """
         lines = []
-        char_height = self.HEIGHT // scale
-        char_width = self.WIDTH // scale
+        max_y = max_rows if max_rows else self.HEIGHT
 
-        for cy in range(0, self.HEIGHT, scale):
+        for cy in range(0, min(max_y, self.HEIGHT), scale):
             line = ""
             for cx in range(0, self.WIDTH, scale):
                 if scale == 2:
@@ -223,6 +224,8 @@ class VirtualScreen:
                     tr = self.pixels[cy][cx+1] if cy < self.HEIGHT and cx+1 < self.WIDTH else 0
                     bl = self.pixels[cy+1][cx] if cy+1 < self.HEIGHT and cx < self.WIDTH else 0
                     br = self.pixels[cy+1][cx+1] if cy+1 < self.HEIGHT and cx+1 < self.WIDTH else 0
+                    if invert:
+                        tl, tr, bl, br = 1-tl, 1-tr, 1-bl, 1-br
                     pattern = (tl << 3) | (tr << 2) | (bl << 1) | br
                     line += self.BLOCKS.get(pattern, ' ')
                 else:
@@ -236,6 +239,8 @@ class VirtualScreen:
                                 break
                         if has_pixel:
                             break
+                    if invert:
+                        has_pixel = not has_pixel
                     line += '█' if has_pixel else ' '
             lines.append(line.rstrip())
 
@@ -504,8 +509,8 @@ class HobbitEmulator:
         """
         Hook for 0x7F78 - Drawing Routine
         In text-only mode, we skip graphics entirely
-        With render_graphics, we capture screen memory after drawing
-        Returns True if handled (skip original code)
+        With render_graphics, we let routine run and capture screen memory
+        Returns True if handled (skip original code), False to run original
         """
         # Check if graphics are enabled (B707 != 0)
         if self.bus.read_mem(0xB707) != 0:
@@ -514,22 +519,30 @@ class HobbitEmulator:
 
             if self.render_graphics:
                 # Let the routine run to draw graphics to screen memory
-                # Then capture and render after it returns
-                # For now, we can't easily do this without running the routine
-                # So just show placeholder and skip
+                # Return False to execute original code
                 if self.show_graphics_placeholder:
                     print(f"\n[Graphics: Location {loc_id}]", flush=True)
+                return False  # Run the actual draw routine
             elif self.show_graphics_placeholder:
                 print(f"\n[Graphics: Location {loc_id}]", flush=True)
+                # Skip graphics, just return
+                self._do_ret()
+                return True
 
         # Skip graphics, just return
         self._do_ret()
         return True
 
-    def capture_screen(self) -> str:
-        """Capture current Spectrum screen memory and render to text"""
+    def capture_screen(self, crop_text: bool = True) -> str:
+        """
+        Capture current Spectrum screen memory and render to text
+        crop_text: if True, only show top 80 rows (graphics area), skip text window
+        """
         self.screen.capture_from_spectrum_memory(self.bus.memory)
-        return self.screen.render_to_text(scale=self.graphics_scale)
+        # Graphics area is roughly top 80 pixels (10 character rows)
+        # Text window is bottom ~100 pixels
+        max_rows = 80 if crop_text else None
+        return self.screen.render_to_text(scale=self.graphics_scale, max_rows=max_rows)
 
     def _hook_print_prop_char(self) -> bool:
         """
@@ -656,7 +669,21 @@ class HobbitEmulator:
                 # Game prints its own ">" prompt, so we just wait
                 try:
                     user_input = input()
-                    if user_input:
+                    # Special commands (not passed to game)
+                    if user_input.upper() == '/SCREEN':
+                        print("\n--- Screen Capture (graphics only) ---")
+                        print(self.capture_screen(crop_text=True))
+                        print("--- End Capture ---\n")
+                        self.cpu.a = 0  # No key pressed, loop again
+                    elif user_input.upper() == '/SCREENFULL':
+                        print("\n--- Full Screen Capture ---")
+                        print(self.capture_screen(crop_text=False))
+                        print("--- End Capture ---\n")
+                        self.cpu.a = 0
+                    elif user_input.upper() == '/QUIT':
+                        self.running = False
+                        self.cpu.a = 0
+                    elif user_input:
                         self.input_queue = user_input + '\r'
                         char = ord(self.input_queue[0])
                         self.input_queue = self.input_queue[1:]
