@@ -202,6 +202,7 @@ class HobbitEmulator:
     PRINT_CHAR = 0x867A    # Print character (char in A)
     DRAW_ROUTINE = 0x7F78  # Graphics routine
     PRINT_PROP_CHAR = 0x87C9  # PrintPropChar - graphical font rendering
+    PRINT_NEWLINE = 0x8583 # Print newline routine (sends 0x0D)
     PRINT_MSG = 0x72DD     # PrintMsg - main text message routine
     GET_KEY = 0x8B93       # GetKey - returns ASCII in A (0 if no key)
     WAIT_FOR_KEY = 0x969A  # WaitForKey2 - busy wait for any keypress
@@ -237,6 +238,11 @@ class HobbitEmulator:
         self.instruction_count = 0
         self.print_count = 0
 
+        # Text output tracking
+        self.current_column = 0  # Track column for stripping leading spaces
+        self.skip_leading_spaces = True  # Skip spaces at start of line
+        self.leading_spaces = 0  # Count leading spaces
+
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
 
@@ -258,6 +264,7 @@ class HobbitEmulator:
         self.hooks[self.PRINT_CHAR] = self._hook_print_char
         self.hooks[self.DRAW_ROUTINE] = self._hook_draw_routine
         self.hooks[self.PRINT_PROP_CHAR] = self._hook_print_prop_char
+        self.hooks[self.PRINT_NEWLINE] = self._hook_print_newline
         self.hooks[self.PRINT_MSG] = self._hook_print_msg
         self.hooks[self.GET_KEY] = self._hook_get_key
         self.hooks[self.WAIT_FOR_KEY] = self._hook_wait_for_key
@@ -339,18 +346,46 @@ class HobbitEmulator:
 
         # Handle printable characters
         if char >= 32 and char < 127:
-            self.output_buffer += chr(char)
-            print(chr(char), end='', flush=True)
-        elif char == 13 or char == 10:  # CR/LF
-            self.output_buffer += '\n'
-            print()
+            # Skip excessive leading spaces (keep up to 4 for indentation)
+            if char == 32 and self.skip_leading_spaces:
+                self.leading_spaces += 1
+                if self.leading_spaces <= 4:
+                    # Keep some indentation
+                    self.output_buffer += chr(char)
+                    print(chr(char), end='', flush=True)
+                    self.current_column += 1
+                # else skip the space
+            else:
+                if char != 32:
+                    self.skip_leading_spaces = False  # Found non-space, stop skipping
+                self.output_buffer += chr(char)
+                print(chr(char), end='', flush=True)
+                self.current_column += 1
         elif char == 127:  # Copyright
             self.output_buffer += '(C)'
             print('(C)', end='', flush=True)
+            self.current_column += 3
 
         # Skip graphical rendering, just return
         self._do_ret()
         return True
+
+    def _hook_print_newline(self) -> bool:
+        """
+        Hook for 0x8583 - Print Newline routine
+        This sends 0x0D to the print system and resets cursor position.
+
+        We output a newline and reset our column counter.
+        Let the original code run to update screen position.
+        """
+        self.output_buffer += '\n'
+        print(flush=True)  # Print newline
+        self.current_column = 0  # Reset column for next line
+        self.skip_leading_spaces = True  # Reset for next line
+        self.leading_spaces = 0  # Reset leading space counter
+
+        # Let original code run to update internal screen position
+        return False
 
     def _hook_print_msg(self) -> bool:
         """
