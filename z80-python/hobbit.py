@@ -243,6 +243,9 @@ class HobbitEmulator:
         self.skip_leading_spaces = True  # Skip spaces at start of line
         self.leading_spaces = 0  # Count leading spaces
 
+        # Graphics mode
+        self.show_graphics_placeholder = False  # Show "[Graphics: X]" for locations
+
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
 
@@ -328,6 +331,13 @@ class HobbitEmulator:
         In text-only mode, we skip graphics entirely
         Returns True if handled (skip original code)
         """
+        # Check if graphics are enabled (B707 != 0)
+        if self.bus.read_mem(0xB707) != 0:
+            # Location ID is in A register
+            loc_id = self.cpu.a
+            if self.show_graphics_placeholder:
+                print(f"\n[Graphics: Location {loc_id}]", flush=True)
+
         # Skip graphics, just return
         self._do_ret()
         return True
@@ -657,6 +667,7 @@ def main():
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
     parser.add_argument('-t', '--trace', action='store_true', help='Enable instruction trace')
     parser.add_argument('-a', '--analyze', action='store_true', help='Analyze TAP only, do not run')
+    parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics placeholders')
     parser.add_argument('-m', '--max', type=int, default=10000000, help='Max instructions')
     parser.add_argument('-c', '--command', action='append', help='Auto-execute command(s)')
     args = parser.parse_args()
@@ -697,6 +708,7 @@ def main():
     emu = HobbitEmulator()
     emu.debug = args.debug
     emu.trace = args.trace
+    emu.show_graphics_placeholder = args.graphics
 
     # Queue auto-commands
     if args.command:
