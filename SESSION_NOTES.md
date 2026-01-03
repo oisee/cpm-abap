@@ -374,23 +374,38 @@ Implementing "The Hobbit" (1982 ZX Spectrum) text adventure using emulator-level
 
 ## Current Status
 
-### Working
+### WORKING - Game is fully interactive!
 - TAP file parsing and loading
 - ROM stubs (RST addresses)
 - Print routine hooks capture text output
-- Room description shows: "you are in a comfortable tunnel like hall", "the wooden chest", "Gandalf", "Thorin"
-- 721 print calls captured
+- Room descriptions, inventory, NPC interactions all working
+- Keyboard input working (GetKey hook)
 
-### Known Issues
-1. **Memory corruption at 0x9B77**: Value changes from 0x9B to 0x00
-   - Causes CALL NZ,$9B80 to jump to 0x0080 (ROM area) instead
-   - Root cause: Still under investigation
-   - Similar to the earlier issue with inline text pattern
+### Fixed Issues
 
-2. **GetKey not being called**: Game runs through display but never polls for input
-   - May be related to memory corruption stopping execution
+1. **Memory corruption at 0x9B77** - FIXED!
+   - Root cause: **EX (SP),HL instruction (opcode 0xE3) was missing** from Z80 emulator
+   - The inline text pattern at 0x8E80 uses EX (SP),HL to swap return address
+   - Without this instruction, execution wandered into text data area
+   - Text bytes executed as Z80 code, corrupting memory
 
-3. **Some text garbled**: Missing newlines, some character mixups
+2. **GetKey not being called** - FIXED!
+   - Once EX (SP),HL was added, game properly waits for input
+
+### Test Results
+```
+> LOOK
+You are in a comfortable tunnel like hall
+To the east there is the round green door
+You see: the wooden chest, Gandalf, Thorin
+Gandalf gives the curious map to you.
+
+> INVENTORY
+You are carrying. a curious map.
+
+> EXAMINE CHEST
+You examine the wooden chest.
+```
 
 ## Files
 
@@ -401,10 +416,12 @@ Implementing "The Hobbit" (1982 ZX Spectrum) text adventure using emulator-level
 | hobbit-disasm/ | Cloned pobtastic/hobbit disassembly (in .gitignore) |
 
 ## Next Steps
-1. Debug memory corruption at 0x9B77
-2. Add proper graphics output stub (screen buffer?)
-3. Get keyboard input working
-4. Test interactive play
+1. ~~Debug memory corruption at 0x9B77~~ DONE
+2. ~~Get keyboard input working~~ DONE
+3. ~~Test interactive play~~ DONE
+4. Add graphics stub (screen buffer for VDU output)
+5. Handle newline formatting in output
+6. Port to SAP/ABAP for web-based play
 
 ---
 
