@@ -129,11 +129,11 @@ def parse_tap_file(filepath: str) -> List[TAPBlock]:
 class VirtualScreen:
     """
     Virtual framebuffer for rendering Hobbit graphics
-    Spectrum resolution: 256x176 pixels
+    Spectrum resolution: 256x192 pixels
     Output: Unicode block characters
     """
     WIDTH = 256
-    HEIGHT = 176
+    HEIGHT = 192
 
     # Unicode block characters for 2x2 pixel blocks
     # Each char represents a 2x2 pixel pattern
@@ -267,6 +267,43 @@ class VirtualScreen:
             lines.pop()
 
         return '\n'.join(lines)
+
+    def flood_fill(self, x: int, y: int, fill_value: int = 1):
+        """
+        Flood fill from (x, y) with scanline algorithm
+        Fills connected empty (0) pixels with fill_value
+        """
+        if not (0 <= x < self.WIDTH and 0 <= y < self.HEIGHT):
+            return
+        if self.pixels[y][x] != 0:
+            return  # Already filled or boundary
+
+        stack = [(x, y)]
+        while stack:
+            cx, cy = stack.pop()
+            if not (0 <= cx < self.WIDTH and 0 <= cy < self.HEIGHT):
+                continue
+            if self.pixels[cy][cx] != 0:
+                continue
+
+            # Find left and right extent of this scanline
+            left = cx
+            while left > 0 and self.pixels[cy][left - 1] == 0:
+                left -= 1
+            right = cx
+            while right < self.WIDTH - 1 and self.pixels[cy][right + 1] == 0:
+                right += 1
+
+            # Fill this scanline
+            for fx in range(left, right + 1):
+                self.pixels[cy][fx] = fill_value
+
+            # Add scanlines above and below
+            for fx in range(left, right + 1):
+                if cy > 0 and self.pixels[cy - 1][fx] == 0:
+                    stack.append((fx, cy - 1))
+                if cy < self.HEIGHT - 1 and self.pixels[cy + 1][fx] == 0:
+                    stack.append((fx, cy + 1))
 
     def capture_from_spectrum_memory(self, memory: bytearray):
         """
@@ -412,6 +449,9 @@ class HobbitEmulator:
         self.pending_graphics = False  # Graphics were drawn, show before next input
         self.screen = VirtualScreen()  # Virtual framebuffer
         self.graphics_scale = 4  # Scale for text rendering (1=256x40, 2=128x40, 4=64x20)
+        # Native graphics - render location graphics directly instead of Z80 emulation
+        self.native_graphics = False  # Use native rendering instead of Z80 draw routine
+        self.current_location_gfx = None  # Current location's graphics data address
 
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
@@ -530,6 +570,7 @@ class HobbitEmulator:
         Hook for 0x7F78 - Drawing Routine
         In text-only mode, we skip graphics entirely
         With render_graphics, we let routine run and capture screen memory
+        With native_graphics, we render directly and skip Z80 code
         Returns True if handled (skip original code), False to run original
         """
         # Check if graphics are enabled (B707 != 0)
@@ -537,7 +578,14 @@ class HobbitEmulator:
             # Location ID is in A register
             loc_id = self.cpu.a
 
-            if self.render_graphics:
+            if self.native_graphics:
+                # Render graphics natively - much faster!
+                self._render_native_graphics(loc_id)
+                if self.auto_show_graphics:
+                    self.pending_graphics = True
+                self._do_ret()
+                return True
+            elif self.render_graphics:
                 # Let the routine run to draw graphics to screen memory
                 if self.auto_show_graphics:
                     self.pending_graphics = True  # Will display before next input
@@ -552,15 +600,217 @@ class HobbitEmulator:
         self._do_ret()
         return True
 
+    def _render_native_graphics(self, loc_id: int):
+        """
+        Render location graphics natively using VirtualScreen
+        Parses Hobbit graphics bytecode and renders directly
+
+        Graphics data format (from richcarl/hobbitgfx):
+        - 0x08 X Y: Move cursor to (X, Y)
+        - 0x80-0xFF N: Draw line with encoded direction/length
+        - 0x40-0x7F X Y: Fill area at (X, Y)
+        - 0x20-0x3F H L N+: Paint background pattern
+        - 0x00: End of graphics
+        """
+        # Location Graphics Table at 0xCC00
+        # Format: each entry is location_id (byte), graphics_offset (word)
+        # Graphics data starts at 0xCC43
+
+        # Find graphics data for this location
+        gfx_addr = self._find_location_graphics(loc_id)
+        if gfx_addr is None:
+            if self.debug:
+                print(f"[No graphics for location {loc_id}]")
+            return
+
+        # Clear screen and parse graphics commands
+        self.screen.clear()
+        self._parse_graphics_commands(gfx_addr)
+
+    def _find_location_graphics(self, loc_id: int) -> Optional[int]:
+        """
+        Find graphics data address for a location ID
+        Searches the Location Graphics Table at 0xCC00
+        """
+        # The table format from icemark data format:
+        # Entries at 0xCC00, graphics data at 0xCC43
+        # Table is: location_id (1 byte), offset (2 bytes) pairs
+
+        table_start = 0xCC00
+        data_start = 0xCC43
+
+        # Scan table (max ~50 entries for Hobbit locations)
+        addr = table_start
+        while addr < data_start:
+            entry_loc = self.bus.read_mem(addr)
+            if entry_loc == 0xFF:  # End marker
+                break
+            if entry_loc == loc_id:
+                # Found it - read 2-byte offset
+                offset_lo = self.bus.read_mem(addr + 1)
+                offset_hi = self.bus.read_mem(addr + 2)
+                offset = offset_lo | (offset_hi << 8)
+                return offset
+            addr += 3  # Next entry
+
+        return None
+
+    def _parse_graphics_commands(self, addr: int):
+        """
+        Parse and execute Hobbit graphics bytecode
+
+        Based on hobbitgfx.js by Richard Carlsson:
+        - First 2 bytes: border color, bg/fg colors
+        - 0x00: End
+        - 0x08 X Y: Move to (X, 127-Y)  -- Y is inverted
+        - 0x20-0x3F H L N+: Paint background pattern
+        - 0x40-0x7F X Y: Fill at (X, 127-Y)
+        - 0x80-0xFF N: Draw line segment
+        """
+        max_commands = 2000  # Safety limit
+        cmd_count = 0
+
+        # First two bytes: border color and initial colors
+        # border = self.bus.read_mem(addr)  # Skip border for now
+        # colors = self.bus.read_mem(addr + 1)  # bg << 3 | fg
+        addr += 2
+
+        pen_x, pen_y = 0, 0
+
+        while cmd_count < max_commands:
+            opcode = self.bus.read_mem(addr)
+            addr += 1
+            cmd_count += 1
+
+            if opcode == 0x00:
+                # End of graphics
+                break
+
+            elif opcode == 0x08:
+                # Move to X, Y (Y is inverted: 127-Y)
+                pen_x = self.bus.read_mem(addr)
+                pen_y = 127 - self.bus.read_mem(addr + 1)
+                addr += 2
+                self.screen.set_pixel(pen_x, pen_y)
+
+            elif opcode > 0x7F:
+                # Draw line segment
+                # d = opcode & 0x07 (direction bits)
+                # n = next_byte & 0x3F (step count)
+                # m = ((opcode & 0x78) >> 1) + ((next_byte & 0xC0) >> 6) (stepping ratio)
+                next_byte = self.bus.read_mem(addr)
+                addr += 1
+
+                d = opcode & 0x07
+                n = next_byte & 0x3F
+                m = ((opcode & 0x78) >> 1) + ((next_byte & 0xC0) >> 6)
+
+                pen_x, pen_y = self._draw_line_segment(pen_x, pen_y, d, n, m)
+
+            elif opcode > 0x3F:
+                # Fill area at X, Y (Y inverted)
+                fill_x = self.bus.read_mem(addr)
+                fill_y = 127 - self.bus.read_mem(addr + 1)
+                addr += 2
+                self.screen.flood_fill(fill_x, fill_y)
+
+            elif opcode > 0x1F:
+                # Paint background pattern - skip for now
+                # Read H, L bytes, then pattern bytes until 0xFF
+                addr += 2  # Skip H, L
+                while self.bus.read_mem(addr) != 0xFF:
+                    addr += 1
+                addr += 1  # Skip the 0xFF terminator
+
+    def _draw_line_segment(self, x: int, y: int, d: int, n: int, m: int) -> Tuple[int, int]:
+        """
+        Draw a line segment and return new pen position
+
+        From hobbitgfx.js drawline() function:
+        d = direction bits:
+          - bit 0 (1): primary axis is Y (vertical) vs X (horizontal)
+          - bit 1 (2): Y direction: 1=down (y++), 0=up (y--)
+          - bit 2 (4): X direction: 1=left (x--), 0=right (x++)
+        n = number of steps
+        m = stepping ratio (controls slope)
+        """
+        m0 = m
+
+        if d & 1:
+            # Primary axis is Y (vertical movement)
+            for _ in range(n + 1):
+                self.screen.set_pixel(x, y)
+                # Move Y
+                if d & 2:
+                    if y < 127:
+                        y += 1
+                    else:
+                        return x, y
+                else:
+                    if y > 0:
+                        y -= 1
+                    else:
+                        return x, y
+                # Step X based on ratio
+                m -= 1
+                if m <= 0:
+                    m = m0
+                    if d & 4:
+                        if x > 0:
+                            x -= 1
+                        else:
+                            return x, y
+                    else:
+                        if x < 255:
+                            x += 1
+                        else:
+                            return x, y
+        else:
+            # Primary axis is X (horizontal movement)
+            for _ in range(n + 1):
+                self.screen.set_pixel(x, y)
+                # Move X
+                if d & 4:
+                    if x > 0:
+                        x -= 1
+                    else:
+                        return x, y
+                else:
+                    if x < 255:
+                        x += 1
+                    else:
+                        return x, y
+                # Step Y based on ratio
+                m -= 1
+                if m <= 0:
+                    m = m0
+                    if d & 2:
+                        if y < 127:
+                            y += 1
+                        else:
+                            return x, y
+                    else:
+                        if y > 0:
+                            y -= 1
+                        else:
+                            return x, y
+
+        return x, y
+
     def capture_screen(self, crop_text: bool = True) -> str:
         """
-        Capture current Spectrum screen memory and render to text
-        crop_text: if True, only show top 80 rows (graphics area), skip text window
+        Capture current screen and render to text
+        With native_graphics, VirtualScreen already has the graphics
+        Otherwise, capture from Spectrum screen memory
+
+        crop_text: if True, only show graphics area, skip text window
         """
-        self.screen.capture_from_spectrum_memory(self.bus.memory)
-        # Graphics area is roughly top 80 pixels (10 character rows)
-        # Text window is bottom ~100 pixels
-        max_rows = 80 if crop_text else None
+        if not self.native_graphics:
+            # Capture from emulated Z80 screen memory
+            self.screen.capture_from_spectrum_memory(self.bus.memory)
+        # Hobbit graphics window: actual scene spans pixel rows ~9-124
+        # Use 128 to capture full graphics area, skip text window below
+        max_rows = 128 if crop_text else None
         return self.screen.render_to_text(scale=self.graphics_scale, max_rows=max_rows)
 
     def _hook_print_prop_char(self) -> bool:
@@ -675,6 +925,13 @@ class HobbitEmulator:
                 print(f"[INPUT:{ch}]", end='', flush=True)
         else:
             # No input queued - block and wait for user input
+
+            # Show pending graphics before processing input
+            if self.pending_graphics:
+                self.pending_graphics = False
+                print(self.capture_screen(crop_text=True))
+                print()  # Blank line after graphics
+
             if self.auto_commands:
                 # Use auto-command
                 cmd = self.auto_commands.pop(0)
@@ -684,12 +941,6 @@ class HobbitEmulator:
                 self.input_queue = self.input_queue[1:]
                 self.cpu.a = char
             else:
-                # Show pending graphics before input prompt
-                if self.pending_graphics:
-                    self.pending_graphics = False
-                    print(self.capture_screen(crop_text=True))
-                    print()  # Blank line after graphics
-
                 # Wait for user input (blocking)
                 # Game prints its own ">" prompt, so we just wait
                 try:
@@ -924,8 +1175,9 @@ def main():
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
     parser.add_argument('-t', '--trace', action='store_true', help='Enable instruction trace')
     parser.add_argument('-a', '--analyze', action='store_true', help='Analyze TAP only, do not run')
-    parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics after each location')
-    parser.add_argument('-r', '--render', action='store_true', help='Render graphics (without auto-display)')
+    parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics after each location (native rendering)')
+    parser.add_argument('-r', '--render', action='store_true', help='Render graphics using Z80 emulation (slow)')
+    parser.add_argument('-n', '--native', action='store_true', help='Use native graphics rendering (fast, default with -g)')
     parser.add_argument('-s', '--scale', type=int, default=4, choices=[1, 2, 4], help='Graphics scale (1=256x88 half-blocks, 2=128x44, 4=64x22)')
     parser.add_argument('-m', '--max', type=int, default=10000000, help='Max instructions')
     parser.add_argument('-c', '--command', action='append', help='Auto-execute command(s)')
@@ -967,9 +1219,17 @@ def main():
     emu = HobbitEmulator()
     emu.debug = args.debug
     emu.trace = args.trace
-    # -g enables auto graphics display, -r just enables rendering for /SCREEN
+    # Graphics modes:
+    # -g: auto-show graphics after location (uses native rendering by default)
+    # -r: use Z80 emulation for graphics (slow, for /SCREEN command)
+    # -n: force native rendering
     emu.auto_show_graphics = args.graphics
-    emu.render_graphics = args.render or args.graphics
+    # -g implies native graphics unless -r is explicitly specified
+    if args.graphics:
+        emu.native_graphics = not args.render  # Native unless -r overrides
+    elif args.native:
+        emu.native_graphics = True
+    emu.render_graphics = args.render  # Z80-emulated rendering
     emu.graphics_scale = args.scale
 
     # Queue auto-commands (if provided via -c)
