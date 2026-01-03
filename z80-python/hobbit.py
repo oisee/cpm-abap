@@ -215,10 +215,28 @@ class VirtualScreen:
         lines = []
         max_y = max_rows if max_rows else self.HEIGHT
 
-        for cy in range(0, min(max_y, self.HEIGHT), scale):
+        # For scale 1, we step by 2 vertically (half-blocks) but 1 horizontally
+        y_step = 2 if scale == 1 else scale
+        x_step = 1 if scale == 1 else scale
+
+        for cy in range(0, min(max_y, self.HEIGHT), y_step):
             line = ""
-            for cx in range(0, self.WIDTH, scale):
-                if scale == 2:
+            for cx in range(0, self.WIDTH, x_step):
+                if scale == 1:
+                    # Half-block: 2 vertical pixels per character, 1 horizontal
+                    top = self.pixels[cy][cx] if cy < self.HEIGHT and cx < self.WIDTH else 0
+                    bot = self.pixels[cy+1][cx] if cy+1 < self.HEIGHT and cx < self.WIDTH else 0
+                    if invert:
+                        top, bot = 1-top, 1-bot
+                    if top and bot:
+                        line += '█'
+                    elif top:
+                        line += '▀'
+                    elif bot:
+                        line += '▄'
+                    else:
+                        line += ' '
+                elif scale == 2:
                     # 2x2 pixel block
                     tl = self.pixels[cy][cx] if cy < self.HEIGHT and cx < self.WIDTH else 0
                     tr = self.pixels[cy][cx+1] if cy < self.HEIGHT and cx+1 < self.WIDTH else 0
@@ -389,9 +407,11 @@ class HobbitEmulator:
 
         # Graphics mode
         self.show_graphics_placeholder = False  # Show "[Graphics: X]" for locations
-        self.render_graphics = False  # Render actual graphics
+        self.render_graphics = False  # Run draw routine (populate screen memory)
+        self.auto_show_graphics = False  # Auto-display graphics after draw
+        self.pending_graphics = False  # Graphics were drawn, show before next input
         self.screen = VirtualScreen()  # Virtual framebuffer
-        self.graphics_scale = 2  # Scale for text rendering (2=128x88, 4=64x44)
+        self.graphics_scale = 4  # Scale for text rendering (1=256x40, 2=128x40, 4=64x20)
 
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
@@ -519,9 +539,8 @@ class HobbitEmulator:
 
             if self.render_graphics:
                 # Let the routine run to draw graphics to screen memory
-                # Return False to execute original code
-                if self.show_graphics_placeholder:
-                    print(f"\n[Graphics: Location {loc_id}]", flush=True)
+                if self.auto_show_graphics:
+                    self.pending_graphics = True  # Will display before next input
                 return False  # Run the actual draw routine
             elif self.show_graphics_placeholder:
                 print(f"\n[Graphics: Location {loc_id}]", flush=True)
@@ -665,6 +684,12 @@ class HobbitEmulator:
                 self.input_queue = self.input_queue[1:]
                 self.cpu.a = char
             else:
+                # Show pending graphics before input prompt
+                if self.pending_graphics:
+                    self.pending_graphics = False
+                    print(self.capture_screen(crop_text=True))
+                    print()  # Blank line after graphics
+
                 # Wait for user input (blocking)
                 # Game prints its own ">" prompt, so we just wait
                 try:
@@ -899,9 +924,9 @@ def main():
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
     parser.add_argument('-t', '--trace', action='store_true', help='Enable instruction trace')
     parser.add_argument('-a', '--analyze', action='store_true', help='Analyze TAP only, do not run')
-    parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics placeholders')
-    parser.add_argument('-r', '--render', action='store_true', help='Render graphics to Unicode blocks')
-    parser.add_argument('-s', '--scale', type=int, default=4, choices=[2, 4], help='Graphics scale (2=128x88, 4=64x44)')
+    parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics after each location')
+    parser.add_argument('-r', '--render', action='store_true', help='Render graphics (without auto-display)')
+    parser.add_argument('-s', '--scale', type=int, default=4, choices=[1, 2, 4], help='Graphics scale (1=256x88 half-blocks, 2=128x44, 4=64x22)')
     parser.add_argument('-m', '--max', type=int, default=10000000, help='Max instructions')
     parser.add_argument('-c', '--command', action='append', help='Auto-execute command(s)')
     args = parser.parse_args()
@@ -942,8 +967,8 @@ def main():
     emu = HobbitEmulator()
     emu.debug = args.debug
     emu.trace = args.trace
-    emu.show_graphics_placeholder = args.graphics
-    # -g implies -r (need to run draw routine to populate screen memory)
+    # -g enables auto graphics display, -r just enables rendering for /SCREEN
+    emu.auto_show_graphics = args.graphics
     emu.render_graphics = args.render or args.graphics
     emu.graphics_scale = args.scale
 
