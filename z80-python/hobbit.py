@@ -242,6 +242,7 @@ class HobbitEmulator:
         self.current_column = 0  # Track column for stripping leading spaces
         self.skip_leading_spaces = True  # Skip spaces at start of line
         self.leading_spaces = 0  # Count leading spaces
+        self.last_was_newline = True  # Track consecutive newlines
 
         # Graphics mode
         self.show_graphics_placeholder = False  # Show "[Graphics: X]" for locations
@@ -364,6 +365,7 @@ class HobbitEmulator:
                     self.output_buffer += chr(char)
                     print(chr(char), end='', flush=True)
                     self.current_column += 1
+                    self.last_was_newline = False
                 # else skip the space
             else:
                 if char != 32:
@@ -371,10 +373,12 @@ class HobbitEmulator:
                 self.output_buffer += chr(char)
                 print(chr(char), end='', flush=True)
                 self.current_column += 1
+                self.last_was_newline = False
         elif char == 127:  # Copyright
             self.output_buffer += '(C)'
             print('(C)', end='', flush=True)
             self.current_column += 3
+            self.last_was_newline = False
 
         # Skip graphical rendering, just return
         self._do_ret()
@@ -386,13 +390,17 @@ class HobbitEmulator:
         This sends 0x0D to the print system and resets cursor position.
 
         We output a newline and reset our column counter.
-        Let the original code run to update screen position.
+        Skip consecutive blank lines.
         """
-        self.output_buffer += '\n'
-        print(flush=True)  # Print newline
+        # Only print newline if we printed something on this line
+        if self.current_column > 0 or not self.last_was_newline:
+            self.output_buffer += '\n'
+            print(flush=True)  # Print newline
+
         self.current_column = 0  # Reset column for next line
         self.skip_leading_spaces = True  # Reset for next line
         self.leading_spaces = 0  # Reset leading space counter
+        self.last_was_newline = True  # Track consecutive newlines
 
         # Let original code run to update internal screen position
         return False
@@ -413,8 +421,9 @@ class HobbitEmulator:
         """
         Hook for 0x8B93 - GetKey routine
         Returns ASCII character in A (0 if no key pressed)
-        From disassembly: scans keyboard matrix, looks up in KeyboardMap, returns char
-        Returns True if handled (skip original code)
+
+        In HALT mode: blocks until user provides input
+        This prevents NPCs from acting while waiting for player input.
         """
         # If we have queued input, return next character
         if self.input_queue:
@@ -425,8 +434,30 @@ class HobbitEmulator:
                 ch = chr(char) if 32 <= char < 127 else f'0x{char:02X}'
                 print(f"[INPUT:{ch}]", end='', flush=True)
         else:
-            # No input queued - return 0 (no key)
-            self.cpu.a = 0
+            # No input queued - block and wait for user input
+            if self.auto_commands:
+                # Use auto-command
+                cmd = self.auto_commands.pop(0)
+                print(f"\n> {cmd}")
+                self.input_queue = cmd + '\r'
+                char = ord(self.input_queue[0])
+                self.input_queue = self.input_queue[1:]
+                self.cpu.a = char
+            else:
+                # Wait for user input (blocking)
+                print("\n> ", end='', flush=True)
+                try:
+                    user_input = input()
+                    if user_input:
+                        self.input_queue = user_input + '\r'
+                        char = ord(self.input_queue[0])
+                        self.input_queue = self.input_queue[1:]
+                        self.cpu.a = char
+                    else:
+                        self.cpu.a = 13  # Just Enter
+                except (EOFError, KeyboardInterrupt):
+                    self.running = False
+                    self.cpu.a = 0
 
         # Execute RET to return from routine
         self._do_ret()
@@ -548,60 +579,26 @@ class HobbitEmulator:
         self.auto_commands.append(cmd)
 
     def run(self, start_addr: int = None, max_instructions: int = 10000000):
-        """Run The Hobbit with GetKey-level input hooking"""
+        """Run The Hobbit with blocking input at GetKey"""
         if start_addr is not None:
             self.cpu.pc = start_addr
 
         self.cpu.sp = 0xFF00  # Set up stack
 
         print("\n=== The Hobbit (Text Mode) ===")
-        if self.auto_commands:
-            print(f"Auto-commands queued: {self.auto_commands}")
-        print("Press Ctrl+C to quit.\n")
+        print("Type commands and press Enter. Ctrl+C to quit.\n")
 
         instructions = 0
-        getkey_calls = 0
-        last_getkey_instruction = 0
 
         try:
             while self.running and not self.cpu.halted and instructions < max_instructions:
-                # Check if we're at GetKey and need more input
-                if self.cpu.pc == self.GET_KEY:
-                    getkey_calls += 1
-                    # If input queue is empty and we've been calling GetKey a lot,
-                    # it means the game is waiting for input
-                    if not self.input_queue and (instructions - last_getkey_instruction) < 1000:
-                        # First try auto-commands, then ask user
-                        if self.auto_commands:
-                            cmd = self.auto_commands.pop(0)
-                            print(f"\n[AUTO] > {cmd}")
-                            self.input_queue = cmd + '\r'  # CR for Enter
-                        else:
-                            # Game is polling for input - get user input
-                            print("\n> ", end='', flush=True)
-                            try:
-                                user_input = input()
-                                self.input_queue = user_input + '\r'  # CR for Enter
-                            except EOFError:
-                                self.running = False
-                                break
-                            except KeyboardInterrupt:
-                                self.running = False
-                                break
-                    last_getkey_instruction = instructions
-
                 self.step()
                 instructions += 1
-
-                # Progress indicator
-                if instructions % 1000000 == 0:
-                    print(f"\n[{instructions} instructions, {getkey_calls} GetKey calls]")
 
         except KeyboardInterrupt:
             print("\n[Interrupted]")
 
         print(f"\n[Executed {instructions} instructions]")
-        print(f"[GetKey calls: {getkey_calls}]")
         print(f"[Final PC: 0x{self.cpu.pc:04X}]")
         return instructions
 
