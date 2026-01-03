@@ -142,6 +142,8 @@ class SpectrumBus(Bus):
         super().__init__()
         self.rom = bytearray(16384)  # 16KB ROM
         self.rom_loaded = False
+        self.watchpoints = set()  # Memory write watchpoints
+        self.watch_callback = None  # Callback for watchpoint hits
 
     def load_rom(self, data: bytes):
         """Load Spectrum ROM at 0x0000"""
@@ -157,6 +159,10 @@ class SpectrumBus(Bus):
 
     def write_mem(self, addr: int, val: int):
         addr = addr & 0xFFFF
+        # Check for watchpoints
+        if addr in self.watchpoints and self.watch_callback:
+            old_val = self.memory[addr]
+            self.watch_callback(addr, old_val, val & 0xFF)
         # ROM is read-only
         if addr >= 0x4000:
             self.memory[addr] = val & 0xFF
@@ -230,6 +236,22 @@ class HobbitEmulator:
         # Statistics
         self.instruction_count = 0
         self.print_count = 0
+
+        # Debug tracking for memory corruption
+        self.last_pc_history = []  # Last N PC values
+
+    def add_watchpoint(self, addr: int):
+        """Add memory write watchpoint"""
+        self.bus.watchpoints.add(addr)
+        self.bus.watch_callback = self._on_watchpoint
+
+    def _on_watchpoint(self, addr: int, old_val: int, new_val: int):
+        """Called when a watchpoint is hit"""
+        pc = self.cpu.pc
+        print(f"\n[WATCHPOINT] 0x{addr:04X}: 0x{old_val:02X} -> 0x{new_val:02X} at PC=0x{pc:04X}")
+        print(f"  Recent PCs: {[hex(p) for p in self.last_pc_history[-10:]]}")
+        print(f"  HL=0x{self.cpu.hl:04X} BC=0x{self.cpu.bc:04X} DE=0x{self.cpu.de:04X}")
+        print(f"  A=0x{self.cpu.a:02X} SP=0x{self.cpu.sp:04X}")
 
     def _setup_default_hooks(self):
         """Set up default routine hooks"""
@@ -454,6 +476,11 @@ class HobbitEmulator:
         """Execute one instruction with hook checking"""
         pc = self.cpu.pc
         self.instruction_count += 1
+
+        # Track PC history for debugging
+        self.last_pc_history.append(pc)
+        if len(self.last_pc_history) > 100:
+            self.last_pc_history.pop(0)
 
         # Trace output
         if self.trace:

@@ -1043,6 +1043,13 @@ class Z80:
             self.hl, self.hl_alt = self.hl_alt, self.hl
             cycles = 4
 
+        # EX (SP),HL - exchange HL with top of stack
+        elif opcode == 0xE3:
+            tmp = self.read16(self.sp)
+            self.write16(self.sp, self.hl)
+            self.hl = tmp
+            cycles = 19
+
         # JP (HL)
         elif opcode == 0xE9:
             self.pc = self.hl
