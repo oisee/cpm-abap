@@ -808,8 +808,7 @@ class HobbitEmulator:
                         y -= 1
                     else:
                         return x, y
-                # Step X based on ratio
-                m -= 1
+                # Step X based on ratio (m-- <= 0 in JS is post-decrement: check first)
                 if m <= 0:
                     m = m0
                     if d & 4:
@@ -822,6 +821,8 @@ class HobbitEmulator:
                             x += 1
                         else:
                             return x, y
+                else:
+                    m -= 1
         else:
             # Primary axis is X (horizontal movement)
             for _ in range(n + 1):
@@ -837,8 +838,7 @@ class HobbitEmulator:
                         x += 1
                     else:
                         return x, y
-                # Step Y based on ratio
-                m -= 1
+                # Step Y based on ratio (m-- <= 0 in JS is post-decrement: check first)
                 if m <= 0:
                     m = m0
                     if d & 2:
@@ -851,6 +851,8 @@ class HobbitEmulator:
                             y -= 1
                         else:
                             return x, y
+                else:
+                    m -= 1
 
         return x, y
 
