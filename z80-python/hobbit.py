@@ -458,6 +458,7 @@ class HobbitEmulator:
         self.recent_output = ""  # Track recent text for game over detection
         self.allow_restart = True  # Allow restart after game over
         self.initial_memory = None  # Saved initial game state for restart
+        self.restart_requested = False  # Flag to signal restart to run loop
 
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
@@ -613,6 +614,8 @@ class HobbitEmulator:
         self.leading_spaces = 0
         # Clear screen
         self.screen.clear()
+        # Signal run loop to reset instruction counter
+        self.restart_requested = True
         print("=== The Hobbit (Text Mode) ===")
         print("Type commands and press Enter. Ctrl+C to quit.\n")
 
@@ -1004,23 +1007,35 @@ class HobbitEmulator:
                 # Game prints its own ">" prompt, so we just wait
                 try:
                     user_input = input()
+                    cmd = user_input.upper()
                     # Special commands (not passed to game)
-                    if user_input.upper() == '/SCREEN':
+                    if cmd == '/SCREEN':
                         print("\n--- Screen Capture (graphics only) ---")
                         print(self.capture_screen(crop_text=True))
                         print("--- End Capture ---\n")
                         self.cpu.a = 0  # No key pressed, loop again
-                    elif user_input.upper() == '/SCREENFULL':
+                    elif cmd == '/SCREENFULL':
                         print("\n--- Full Screen Capture ---")
                         print(self.capture_screen(crop_text=False))
                         print("--- End Capture ---\n")
                         self.cpu.a = 0
-                    elif user_input.upper() == '/QUIT':
+                    elif cmd in ('/QUIT', '/EXIT', '/Q'):
                         self.running = False
                         self.cpu.a = 0
-                    elif user_input.upper() == '/RESTART':
+                    elif cmd in ('/RESTART', '/RESET', '/NEW'):
                         self.restart_game()
                         self.cpu.a = 0  # Will re-enter game loop
+                    elif cmd in ('/HELP', '/?'):
+                        print("\n--- Emulator Commands ---")
+                        print("/SCREEN     - Show current location graphics")
+                        print("/SCREENFULL - Show full screen capture")
+                        print("/RESTART    - Restart game from beginning")
+                        print("/QUIT       - Exit emulator")
+                        print("/HELP       - Show this help")
+                        print("--- Game Commands ---")
+                        print("LOOK, GO, TAKE, DROP, OPEN, CLOSE, SAY, etc.")
+                        print("-----------------------\n")
+                        self.cpu.a = 0
                     elif user_input:
                         self.input_queue = user_input + '\r'
                         char = ord(self.input_queue[0])
@@ -1165,6 +1180,11 @@ class HobbitEmulator:
 
         try:
             while self.running and not self.cpu.halted and instructions < max_instructions:
+                # Check for restart request (resets instruction counter)
+                if self.restart_requested:
+                    self.restart_requested = False
+                    instructions = 0
+
                 self.step()
                 instructions += 1
 
