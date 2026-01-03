@@ -126,6 +126,144 @@ def parse_tap_file(filepath: str) -> List[TAPBlock]:
     return blocks
 
 
+class VirtualScreen:
+    """
+    Virtual framebuffer for rendering Hobbit graphics
+    Spectrum resolution: 256x176 pixels
+    Output: Unicode block characters
+    """
+    WIDTH = 256
+    HEIGHT = 176
+
+    # Unicode block characters for 2x2 pixel blocks
+    # Each char represents a 2x2 pixel pattern
+    BLOCKS = {
+        0b0000: ' ',   # Empty
+        0b0001: '▗',   # Bottom-right
+        0b0010: '▖',   # Bottom-left
+        0b0011: '▄',   # Bottom half
+        0b0100: '▝',   # Top-right
+        0b0101: '▐',   # Right half
+        0b0110: '▞',   # Diagonal
+        0b0111: '▟',   # All but top-left
+        0b1000: '▘',   # Top-left
+        0b1001: '▚',   # Diagonal
+        0b1010: '▌',   # Left half
+        0b1011: '▙',   # All but top-right
+        0b1100: '▀',   # Top half
+        0b1101: '▜',   # All but bottom-left
+        0b1110: '▛',   # All but bottom-right
+        0b1111: '█',   # Full block
+    }
+
+    def __init__(self):
+        # 1-bit framebuffer (black/white)
+        self.pixels = [[0] * self.WIDTH for _ in range(self.HEIGHT)]
+        self.pen_x = 0
+        self.pen_y = 0
+
+    def clear(self):
+        """Clear framebuffer"""
+        for y in range(self.HEIGHT):
+            for x in range(self.WIDTH):
+                self.pixels[y][x] = 0
+
+    def set_pixel(self, x: int, y: int, color: int = 1):
+        """Set a pixel"""
+        if 0 <= x < self.WIDTH and 0 <= y < self.HEIGHT:
+            self.pixels[y][x] = color
+
+    def draw_line(self, x1: int, y1: int, x2: int, y2: int):
+        """Draw a line using Bresenham's algorithm"""
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+        err = dx - dy
+
+        while True:
+            self.set_pixel(x1, y1)
+            if x1 == x2 and y1 == y2:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x1 += sx
+            if e2 < dx:
+                err += dx
+                y1 += sy
+
+    def move_to(self, x: int, y: int):
+        """Move pen without drawing"""
+        self.pen_x = x
+        self.pen_y = y
+
+    def line_to(self, x: int, y: int):
+        """Draw line from current position"""
+        self.draw_line(self.pen_x, self.pen_y, x, y)
+        self.pen_x = x
+        self.pen_y = y
+
+    def render_to_text(self, scale: int = 2) -> str:
+        """
+        Render framebuffer to Unicode block characters
+        scale=2 means 2x2 pixels per character (128x88 chars)
+        scale=4 means 4x4 pixels per character (64x44 chars)
+        """
+        lines = []
+        char_height = self.HEIGHT // scale
+        char_width = self.WIDTH // scale
+
+        for cy in range(0, self.HEIGHT, scale):
+            line = ""
+            for cx in range(0, self.WIDTH, scale):
+                if scale == 2:
+                    # 2x2 pixel block
+                    tl = self.pixels[cy][cx] if cy < self.HEIGHT and cx < self.WIDTH else 0
+                    tr = self.pixels[cy][cx+1] if cy < self.HEIGHT and cx+1 < self.WIDTH else 0
+                    bl = self.pixels[cy+1][cx] if cy+1 < self.HEIGHT and cx < self.WIDTH else 0
+                    br = self.pixels[cy+1][cx+1] if cy+1 < self.HEIGHT and cx+1 < self.WIDTH else 0
+                    pattern = (tl << 3) | (tr << 2) | (bl << 1) | br
+                    line += self.BLOCKS.get(pattern, ' ')
+                else:
+                    # Larger scale - check if any pixel is set
+                    has_pixel = False
+                    for dy in range(scale):
+                        for dx in range(scale):
+                            py, px = cy + dy, cx + dx
+                            if py < self.HEIGHT and px < self.WIDTH and self.pixels[py][px]:
+                                has_pixel = True
+                                break
+                        if has_pixel:
+                            break
+                    line += '█' if has_pixel else ' '
+            lines.append(line.rstrip())
+
+        # Remove trailing empty lines
+        while lines and not lines[-1]:
+            lines.pop()
+
+        return '\n'.join(lines)
+
+    def capture_from_spectrum_memory(self, memory: bytearray):
+        """
+        Capture graphics from ZX Spectrum screen memory (0x4000-0x57FF)
+        Spectrum uses a complex address layout:
+        Address = 0x4000 + (y7y6)*2048 + (y2y1y0)*256 + (y5y4y3)*32 + x_byte
+        """
+        self.clear()
+        for y in range(min(192, self.HEIGHT)):
+            y7y6 = (y >> 6) & 0x03
+            y5y4y3 = (y >> 3) & 0x07
+            y2y1y0 = y & 0x07
+            for x_byte in range(32):
+                addr = 0x4000 + (y7y6 * 2048) + (y2y1y0 * 256) + (y5y4y3 * 32) + x_byte
+                byte = memory[addr]
+                for bit in range(8):
+                    if byte & (0x80 >> bit):
+                        self.set_pixel(x_byte * 8 + bit, y)
+
+
 class SpectrumBus(Bus):
     """
     ZX Spectrum 48K memory map:
@@ -246,6 +384,9 @@ class HobbitEmulator:
 
         # Graphics mode
         self.show_graphics_placeholder = False  # Show "[Graphics: X]" for locations
+        self.render_graphics = False  # Render actual graphics
+        self.screen = VirtualScreen()  # Virtual framebuffer
+        self.graphics_scale = 2  # Scale for text rendering (2=128x88, 4=64x44)
 
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
@@ -363,18 +504,32 @@ class HobbitEmulator:
         """
         Hook for 0x7F78 - Drawing Routine
         In text-only mode, we skip graphics entirely
+        With render_graphics, we capture screen memory after drawing
         Returns True if handled (skip original code)
         """
         # Check if graphics are enabled (B707 != 0)
         if self.bus.read_mem(0xB707) != 0:
             # Location ID is in A register
             loc_id = self.cpu.a
-            if self.show_graphics_placeholder:
+
+            if self.render_graphics:
+                # Let the routine run to draw graphics to screen memory
+                # Then capture and render after it returns
+                # For now, we can't easily do this without running the routine
+                # So just show placeholder and skip
+                if self.show_graphics_placeholder:
+                    print(f"\n[Graphics: Location {loc_id}]", flush=True)
+            elif self.show_graphics_placeholder:
                 print(f"\n[Graphics: Location {loc_id}]", flush=True)
 
         # Skip graphics, just return
         self._do_ret()
         return True
+
+    def capture_screen(self) -> str:
+        """Capture current Spectrum screen memory and render to text"""
+        self.screen.capture_from_spectrum_memory(self.bus.memory)
+        return self.screen.render_to_text(scale=self.graphics_scale)
 
     def _hook_print_prop_char(self) -> bool:
         """
@@ -718,6 +873,8 @@ def main():
     parser.add_argument('-t', '--trace', action='store_true', help='Enable instruction trace')
     parser.add_argument('-a', '--analyze', action='store_true', help='Analyze TAP only, do not run')
     parser.add_argument('-g', '--graphics', action='store_true', help='Show graphics placeholders')
+    parser.add_argument('-r', '--render', action='store_true', help='Render graphics to Unicode blocks')
+    parser.add_argument('-s', '--scale', type=int, default=4, choices=[2, 4], help='Graphics scale (2=128x88, 4=64x44)')
     parser.add_argument('-m', '--max', type=int, default=10000000, help='Max instructions')
     parser.add_argument('-c', '--command', action='append', help='Auto-execute command(s)')
     args = parser.parse_args()
@@ -759,6 +916,8 @@ def main():
     emu.debug = args.debug
     emu.trace = args.trace
     emu.show_graphics_placeholder = args.graphics
+    emu.render_graphics = args.render
+    emu.graphics_scale = args.scale
 
     # Queue auto-commands (if provided via -c)
     if args.command:
