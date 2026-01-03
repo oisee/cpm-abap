@@ -290,10 +290,15 @@ class HobbitEmulator:
         if char == 13 or char == 10:  # CR/LF
             self.output_buffer += '\n'
             print()
+            self.current_column = 0
+            self.skip_leading_spaces = True
+            self.leading_spaces = 0
         elif char == 8:  # Backspace
             if self.output_buffer:
                 self.output_buffer = self.output_buffer[:-1]
                 print('\b \b', end='', flush=True)
+            if self.current_column > 0:
+                self.current_column -= 1
         elif char == 22:  # AT control (Spectrum specific) - next 2 bytes are row,col
             # Skip this - it's a positioning command
             pass
@@ -304,17 +309,22 @@ class HobbitEmulator:
             if char != 43:  # Skip "+"
                 self.output_buffer += chr(char)
                 print(chr(char), end='', flush=True)
+                self.current_column += 1
+                self.skip_leading_spaces = False
         elif char == 127:  # Delete / copyright symbol
             self.output_buffer += '(C)'
             print('(C)', end='', flush=True)
+            self.current_column += 3
         elif char >= 128 and char <= 143:
             # Spectrum block graphics - show as block
             self.output_buffer += '#'
             print('#', end='', flush=True)
+            self.current_column += 1
         elif char >= 144:
             # UDGs - show placeholder
             self.output_buffer += '?'
             print('?', end='', flush=True)
+            self.current_column += 1
         else:
             # Other control chars - ignore
             if self.debug:
@@ -357,24 +367,41 @@ class HobbitEmulator:
 
         # Handle printable characters
         if char >= 32 and char < 127:
-            # Skip excessive leading spaces (keep up to 4 for indentation)
-            if char == 32 and self.skip_leading_spaces:
+            if char == 32:
+                # Track spaces
                 self.leading_spaces += 1
-                if self.leading_spaces <= 4:
-                    # Keep some indentation
-                    self.output_buffer += chr(char)
-                    print(chr(char), end='', flush=True)
-                    self.current_column += 1
-                    self.last_was_newline = False
-                # else skip the space
+
+                if self.skip_leading_spaces:
+                    # Already skipping spaces (after newline or column positioning)
+                    # Skip all leading spaces silently
+                    pass
+                elif self.leading_spaces >= 8 and self.current_column > 0:
+                    # Lots of spaces after text = column positioning, convert to newline
+                    self.output_buffer += '\n'
+                    print(flush=True)
+                    self.current_column = 0
+                    self.skip_leading_spaces = True  # Skip remaining spaces
+                    self.last_was_newline = True
+                elif self.leading_spaces == 1:
+                    # First space - wait to see if more follow
+                    pass
+                # else: accumulating spaces, keep waiting
             else:
-                if char != 32:
-                    self.skip_leading_spaces = False  # Found non-space, stop skipping
+                # Non-space character
+                # First output any accumulated single spaces (1-7 spaces between words)
+                if self.leading_spaces >= 1 and self.leading_spaces < 8 and not self.skip_leading_spaces:
+                    # Small gap between words - output single space
+                    self.output_buffer += ' '
+                    print(' ', end='', flush=True)
+                    self.current_column += 1
+                self.leading_spaces = 0
+                self.skip_leading_spaces = False  # Found non-space, stop skipping
                 self.output_buffer += chr(char)
                 print(chr(char), end='', flush=True)
                 self.current_column += 1
                 self.last_was_newline = False
         elif char == 127:  # Copyright
+            self.leading_spaces = 0
             self.output_buffer += '(C)'
             print('(C)', end='', flush=True)
             self.current_column += 3
@@ -438,14 +465,14 @@ class HobbitEmulator:
             if self.auto_commands:
                 # Use auto-command
                 cmd = self.auto_commands.pop(0)
-                print(f"\n> {cmd}")
+                print(f"> {cmd}")
                 self.input_queue = cmd + '\r'
                 char = ord(self.input_queue[0])
                 self.input_queue = self.input_queue[1:]
                 self.cpu.a = char
             else:
                 # Wait for user input (blocking)
-                print("\n> ", end='', flush=True)
+                print("> ", end='', flush=True)
                 try:
                     user_input = input()
                     if user_input:
@@ -707,13 +734,10 @@ def main():
     emu.trace = args.trace
     emu.show_graphics_placeholder = args.graphics
 
-    # Queue auto-commands
+    # Queue auto-commands (if provided via -c)
     if args.command:
         for cmd in args.command:
             emu.queue_command(cmd)
-    else:
-        # Default test command
-        emu.queue_command("LOOK")
 
     # Set up ROM stubs
     emu.setup_spectrum_rom_stubs()

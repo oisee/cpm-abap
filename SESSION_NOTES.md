@@ -396,15 +396,18 @@ Implementing "The Hobbit" (1982 ZX Spectrum) text adventure using emulator-level
 ```
 > LOOK
 You are in a comfortable tunnel like hall
+[Graphics: Location 1]
+
 To the east there is the round green door
-You see: the wooden chest, Gandalf, Thorin
+You see :
+the wooden chest.
+Gandalf. Gandalf is carrying
+a curious map.
+Thorin.
 Gandalf gives the curious map to you.
-
-> INVENTORY
-You are carrying. a curious map.
-
-> EXAMINE CHEST
-You examine the wooden chest.
+Thorin says " Hurry up ".
+> > OPEN CHEST
+You open the wooden chest.
 ```
 
 ## Files
@@ -412,16 +415,20 @@ You examine the wooden chest.
 | File | Description |
 |------|-------------|
 | z80-python/hobbit.py | Hobbit emulator with hooks |
+| z80-python/z80.py | Z80 emulator (added EX (SP),HL instruction) |
 | docs/HOBBIT12.TAP | Game TAP file |
 | hobbit-disasm/ | Cloned pobtastic/hobbit disassembly (in .gitignore) |
 
-## Next Steps
-1. ~~Debug memory corruption at 0x9B77~~ DONE
+## Completed
+1. ~~Debug memory corruption at 0x9B77~~ DONE - EX (SP),HL was missing
 2. ~~Get keyboard input working~~ DONE
 3. ~~Test interactive play~~ DONE
-4. Add graphics stub (screen buffer for VDU output)
-5. Handle newline formatting in output
-6. Port to SAP/ABAP for web-based play
+4. ~~Graphics placeholder~~ DONE - Use -g flag
+5. ~~Newline formatting~~ DONE - Column positioning converted to newlines
+
+## Next Steps
+1. Port to SAP/ABAP for web-based play
+2. Add actual graphics rendering (optional)
 
 ---
 
