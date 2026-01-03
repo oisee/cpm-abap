@@ -453,6 +453,12 @@ class HobbitEmulator:
         self.native_graphics = False  # Use native rendering instead of Z80 draw routine
         self.current_location_gfx = None  # Current location's graphics data address
 
+        # Game over detection and restart
+        self.game_over = False  # Detected "You are dead" or similar
+        self.recent_output = ""  # Track recent text for game over detection
+        self.allow_restart = True  # Allow restart after game over
+        self.initial_memory = None  # Saved initial game state for restart
+
         # Debug tracking for memory corruption
         self.last_pc_history = []  # Last N PC values
 
@@ -561,9 +567,54 @@ class HobbitEmulator:
 
         sys.stdout.flush()
 
+        # Track recent output for game over detection
+        self.recent_output += chr(char) if 32 <= char < 127 else ('\n' if char in (10, 13) else '')
+        if len(self.recent_output) > 100:
+            self.recent_output = self.recent_output[-100:]
+        # Detect game over conditions
+        if 'You are dead' in self.recent_output or 'have mastered' in self.recent_output:
+            self.game_over = True
+
         # Execute RET to return from routine
         self._do_ret()
         return True
+
+    def save_initial_state(self):
+        """Save initial game memory state for restart"""
+        # Save memory from 0x6000 onwards (game code and data)
+        self.initial_memory = bytes(self.bus.memory[0x6000:0x10000])
+
+    def restart_game(self):
+        """Reset game state and restart from beginning"""
+        print("\n\n=== RESTARTING GAME ===\n")
+
+        # Restore initial memory state
+        if self.initial_memory:
+            for i, b in enumerate(self.initial_memory):
+                self.bus.memory[0x6000 + i] = b
+
+        # Reset CPU state
+        self.cpu.pc = self.ENTRY_POINT
+        self.cpu.sp = 0xFF00
+        self.cpu.halted = False
+        self.cpu.a = self.cpu.b = self.cpu.c = self.cpu.d = self.cpu.e = 0
+        self.cpu.h = self.cpu.l = 0
+        self.cpu.f = 0
+        self.cpu.ix = self.cpu.iy = 0
+        # Reset game flags
+        self.game_over = False
+        self.recent_output = ""
+        self.output_buffer = ""
+        self.input_queue = ""
+        self.auto_commands = []
+        # Reset text tracking
+        self.current_column = 0
+        self.skip_leading_spaces = True
+        self.leading_spaces = 0
+        # Clear screen
+        self.screen.clear()
+        print("=== The Hobbit (Text Mode) ===")
+        print("Type commands and press Enter. Ctrl+C to quit.\n")
 
     def _hook_draw_routine(self) -> bool:
         """
@@ -582,7 +633,10 @@ class HobbitEmulator:
                 # Render graphics natively - much faster!
                 self._render_native_graphics(loc_id)
                 if self.auto_show_graphics:
-                    self.pending_graphics = True
+                    # Display graphics immediately (before text description)
+                    print()  # Newline to separate from any preceding text
+                    print(self.capture_screen(crop_text=True))
+                    print()  # Blank line before text
                 self._do_ret()
                 return True
             elif self.render_graphics:
@@ -941,6 +995,11 @@ class HobbitEmulator:
                 self.input_queue = self.input_queue[1:]
                 self.cpu.a = char
             else:
+                # Check for game over - offer restart
+                if self.game_over and self.allow_restart:
+                    print("\n[Game Over - Type /RESTART to play again, or /QUIT to exit]")
+                    self.game_over = False  # Reset flag so we only show once
+
                 # Wait for user input (blocking)
                 # Game prints its own ">" prompt, so we just wait
                 try:
@@ -959,6 +1018,9 @@ class HobbitEmulator:
                     elif user_input.upper() == '/QUIT':
                         self.running = False
                         self.cpu.a = 0
+                    elif user_input.upper() == '/RESTART':
+                        self.restart_game()
+                        self.cpu.a = 0  # Will re-enter game loop
                     elif user_input:
                         self.input_queue = user_input + '\r'
                         char = ord(self.input_queue[0])
@@ -1248,6 +1310,9 @@ def main():
             if load_addr > 0:
                 print(f"  Loading '{block.name}' ({len(block.data)} bytes) at 0x{load_addr:04X}")
                 emu.bus.load(load_addr, block.data)
+
+    # Save initial state for restart capability
+    emu.save_initial_state()
 
     # Entry point is 0x6C00 (from RANDOMIZE USR 27648 in BASIC loader)
     entry = HobbitEmulator.ENTRY_POINT
