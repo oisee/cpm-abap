@@ -9,6 +9,7 @@ CLASS ltc_hobbit_speedrun DEFINITION FINAL FOR TESTING
     METHODS test_open_door FOR TESTING.
     METHODS test_echo_format FOR TESTING.
     METHODS test_double_prompt FOR TESTING.
+    METHODS test_kill_thorin FOR TESTING.
 ENDCLASS.
 
 CLASS ltc_hobbit_speedrun IMPLEMENTATION.
@@ -50,6 +51,18 @@ CLASS ltc_hobbit_speedrun IMPLEMENTATION.
     DATA(lv_log) = lo_speedrun->get_log_as_text( ).
     cl_abap_unit_assert=>assert_equals( act = ls_result-assertions_fail exp = 0
       msg = |Double prompt found. Log: { lv_log }| ).
+  ENDMETHOD.
+
+  METHOD test_kill_thorin.
+    " Test that "kill thorin" command processes (combat is random, so accept either outcome)
+    DATA lt_script TYPE zcl_hobbit_speedrun=>tt_commands.
+    APPEND 'kill thorin' TO lt_script.
+    APPEND '%=You attack Thorin' TO lt_script.  " This always appears
+    DATA(lo_speedrun) = NEW zcl_hobbit_speedrun( iv_tap_data = gv_tap_data it_commands = lt_script ).
+    DATA(ls_result) = lo_speedrun->run( ).
+    DATA(lv_log) = lo_speedrun->get_log_as_text( ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-assertions_fail exp = 0
+      msg = |Kill thorin failed. Log: { lv_log }| ).
   ENDMETHOD.
 
 ENDCLASS.
